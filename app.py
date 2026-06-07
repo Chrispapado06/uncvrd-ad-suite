@@ -628,7 +628,7 @@ body{overflow-x:hidden}
 <div id="view-settings" class="view" hidden><main>
   <div class="card">
     <label>Credentials</label>
-    <div class="src-note" style="margin-bottom:14px">Everything this project needs, in one place. Stored locally on this computer only (<code>credentials.json</code>) — never uploaded or shared. Leave a secret blank to keep the saved one.</div>
+    <div class="src-note" style="margin-bottom:14px">Keys are already loaded securely on the server — a field showing <b>•••• saved</b> is set and working; <b>leave it blank</b>. Only type in a field if you want to <b>replace</b> that key (e.g. add the Meta token).</div>
     <div class="field"><label>Anthropic API key <span class="muted" style="text-transform:none">· powers the analyst &amp; Bernard</span></label><input id="c_anthropic" type="password" placeholder="sk-ant-..."></div>
     <div class="row"><div class="field" style="flex:1;min-width:240px"><label>Supabase URL</label><input id="c_supabase_url" type="text" placeholder="https://xxxx.supabase.co"></div>
     <div class="field" style="flex:1;min-width:240px"><label>Supabase anon key</label><input id="c_supabase_anon_key" type="password" placeholder="anon key — turns on live data"></div></div>
@@ -661,7 +661,7 @@ $("toSettings").addEventListener("click",e=>{e.preventDefault();setView("setting
 
 async function loadConfig(){
   const d = await (await fetch("/config")).json();
-  creators = d.creators||[]; hasKey = !!(d.has&&d.has.anthropic);
+  creators = d.creators||[]; hasKey = !!(d.has&&d.has.anthropic_key);
   $("c_supabase_url").value = d.supabase_url||"";
   $("c_meta_ad_acct").value = d.meta_ad_acct||"";
   const ph = (id,has)=>{ if(has) $(id).placeholder = "•••••••• saved"; };
