@@ -534,6 +534,18 @@ button.primary:active,.ghost:active,.icon-btn:active,.chip:active{transform:scal
 button.primary::before,.ghost::before,.icon-btn::before,.chip::before{content:"";position:absolute;inset:-1.5px;border-radius:inherit;z-index:-1;opacity:0;padding:1.25px;background:conic-gradient(from var(--bang),#ff004c,#ff8a00,#ffe600,#28ff00,#00e1ff,#5b6bff,#d400ff,#ff004c);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude;transition:opacity .2s ease;animation:huebang 2.6s linear infinite}
 button.primary:hover::before,.ghost:hover::before,.icon-btn:hover::before,.chip:hover::before{opacity:1}
 @keyframes huebang{to{--bang:360deg}}
+/* mobile */
+body{overflow-x:hidden}
+@media(max-width:600px){
+  header{height:auto;min-height:52px;flex-wrap:wrap;padding:10px 14px;gap:8px}
+  .brand{font-size:15px}
+  nav{order:3;width:100%;overflow-x:auto;gap:4px}
+  .icon-btn{margin-left:auto}
+  .view{height:auto;min-height:calc(100vh - 112px);overflow:visible}
+  #dash{height:calc(100vh - 112px)}
+  main{padding:16px 14px}
+  .row .field{min-width:0}
+}
 </style></head>
 <body>
 <header>

@@ -92,6 +92,20 @@
     background-repeat:no-repeat;background-position:right 11px center;background-size:11px;padding-right:32px}
   select:hover{border-color:var(--accent)}
   .embed-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+  /* mobile polish */
+  body{overflow-x:hidden}
+  .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tscroll table{white-space:nowrap;min-width:max-content}
+  @media(max-width:560px){
+    header{padding:14px 16px}
+    main{padding:16px 14px 54px}
+    h1{font-size:17px}
+    .kpi .val{font-size:23px}
+    th,td{padding:8px 9px;font-size:12.5px}
+    .card{padding:15px 14px}
+    .row{gap:10px}
+    .addrow input,.addrow select{min-width:0}
+  }
   .dnav{display:flex;gap:4px}
   .dtab{background:transparent;border:1px solid transparent;color:var(--muted);border-radius:9px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
   .dtab:hover{color:var(--text)}
@@ -185,6 +199,7 @@
 
   <div class="card mb">
     <h2>Variant leaderboard</h2>
+    <div class="tscroll">
     <table id="variantTable">
       <thead><tr>
         <th>Variant</th><th>Creator</th><th>Platform</th><th>Spend</th><th>Clicks</th>
@@ -192,16 +207,19 @@
       </tr></thead>
       <tbody></tbody>
     </table>
+    </div>
   </div>
 
   <div class="grid cols mb">
     <div class="card"><h2>Spend vs revenue by variant</h2><canvas id="varChart"></canvas></div>
     <div class="card">
       <h2>Platform summary</h2>
+      <div class="tscroll">
       <table id="platTable">
         <thead><tr><th>Platform</th><th>Spend</th><th>Clicks</th><th>New Fans</th><th>Revenue</th><th>CPC</th><th>CAC</th><th>ROAS</th></tr></thead>
         <tbody></tbody>
       </table>
+      </div>
     </div>
   </div>
 
