@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: uncvrd-ad-suite
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: ONLYFANS_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: AGENT_ID
+        value: agent_01RaK8t5uSWk2iSXMxNyLqkb
+      - key: ENVIRONMENT_ID
+        value: env_01F4NF3a7dzjY9sr3Cu3yE1C

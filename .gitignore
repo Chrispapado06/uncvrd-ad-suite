@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+credentials.json
+agent.json
+of_live.json
+creators.json
+sample-daily-log.csv
+outputs/

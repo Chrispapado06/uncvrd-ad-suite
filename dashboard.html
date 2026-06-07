@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UNCVRD Ad Tracker — Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#14171e; --panel2:#1b1f28; --line:#262b36;
+    --text:#e8ebf2; --muted:#8b94a5; --accent:#7c5cff; --accent2:#a78bfa;
+    --green:#37d399; --amber:#f2c14e; --red:#f06a6a;
+    --shadow:0 1px 2px rgba(0,0,0,.35); --shadow-lg:0 10px 30px rgba(0,0,0,.45);
+    --chart-grid:rgba(255,255,255,.07); --chart-tick:#8b94a5;
+    --kpi-accent:linear-gradient(135deg,#7c5cff,#a78bfa); --radius:16px;
+  }
+  [data-theme="light"]{
+    --bg:#f5f7fa; --panel:#ffffff; --panel2:#eef1f6; --line:#e4e8ef;
+    --text:#161922; --muted:#69727f; --accent:#6d4bff; --accent2:#8b6cff;
+    --green:#0a9d5e; --amber:#b07a12; --red:#d6455a;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.07); --shadow-lg:0 12px 32px rgba(16,24,40,.12);
+    --chart-grid:rgba(16,24,40,.08); --chart-tick:#69727f;
+    --kpi-accent:linear-gradient(135deg,#6d4bff,#8b6cff);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
+    padding:18px 24px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+  h1{font-size:18px;margin:0;letter-spacing:.3px}
+  h1 span{color:var(--accent)}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  select,input,button{background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:8px;padding:7px 10px;font-size:13px}
+  button{cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  main{padding:20px 24px;max-width:1280px;margin:0 auto}
+  .grid{display:grid;gap:14px}
+  .kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .kpi .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+  .kpi .val{font-size:24px;font-weight:700;margin-top:4px}
+  .kpi .sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .cols{grid-template-columns:1fr 1fr}
+  .cols3{grid-template-columns:1.4fr 1fr}
+  @media(max-width:880px){.cols,.cols3{grid-template-columns:1fr}}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 12px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:right;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  tbody tr:hover{background:var(--panel2)}
+  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700}
+  .b-SCALE{background:rgba(55,211,153,.15);color:var(--green)}
+  .b-KEEP{background:rgba(242,193,78,.15);color:var(--amber)}
+  .b-CUT{background:rgba(240,106,106,.15);color:var(--red)}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .action{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line)}
+  .action:last-child{border-bottom:none}
+  .dot{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:0 0 auto}
+  .muted{color:var(--muted)}
+  .row{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:18px}
+  .mb{margin-bottom:18px}
+  canvas{max-height:260px}
+  .src-note{font-size:12px;color:var(--muted)}
+  details summary{cursor:pointer;color:var(--accent);font-size:13px}
+  .conn{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:10px}
+  @media(max-width:880px){.conn{grid-template-columns:1fr}}
+  /* ── modern + theming polish ───────────────────────────────── */
+  body{transition:background .25s ease,color .25s ease;-webkit-font-smoothing:antialiased}
+  header{background:var(--bg);backdrop-filter:saturate(140%) blur(8px);transition:background .25s,border-color .25s}
+  h1{display:flex;align-items:center;gap:10px;letter-spacing:-.2px;font-weight:700}
+  h1 .logo{width:26px;height:26px;border-radius:8px;background:var(--kpi-accent);display:inline-block;flex:0 0 auto;box-shadow:0 2px 8px rgba(124,92,255,.35)}
+  h1 .grad{background:var(--kpi-accent);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .icon-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;width:38px;height:34px;display:inline-flex;align-items:center;justify-content:center;font-size:15px;cursor:pointer;transition:.15s}
+  .icon-btn:hover{border-color:var(--accent)}
+  select,input,button{border-radius:10px;transition:border-color .15s,box-shadow .15s,background .25s,color .25s}
+  input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,92,255,.22)}
+  .card{border-radius:var(--radius);box-shadow:var(--shadow);transition:background .25s,border-color .2s,box-shadow .2s}
+  .card:hover{box-shadow:var(--shadow-lg)}
+  .kpi{position:relative;overflow:hidden}
+  .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--kpi-accent);opacity:0;transition:opacity .2s}
+  .kpi:hover::before{opacity:.95}
+  .kpi .val{font-size:27px;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+  td{font-variant-numeric:tabular-nums}
+  tbody tr{transition:background .12s}
+  .badge{padding:3px 10px;letter-spacing:.3px}
+  /* Creators page */
+  /* modern custom dropdowns (no OS chrome) */
+  select{-webkit-appearance:none;-moz-appearance:none;appearance:none;cursor:pointer;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b94a5' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 11px center;background-size:11px;padding-right:32px}
+  select:hover{border-color:var(--accent)}
+  .embed-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+  .dnav{display:flex;gap:4px}
+  .dtab{background:transparent;border:1px solid transparent;color:var(--muted);border-radius:9px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
+  .dtab:hover{color:var(--text)}
+  .dtab.active{color:var(--text);background:var(--panel2);border-color:var(--line)}
+  .cmgr{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;background:var(--panel2)}
+  .cmgr input,.cmgr select{background-color:var(--panel)}
+  .cmgr-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .cmgr-name{font-weight:700;font-size:15px}
+  .cmgr-x{color:var(--muted);cursor:pointer;font-size:18px;line-height:1}.cmgr-x:hover{color:var(--red)}
+  .cmgr-pay{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .cmgr-pay label{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+  .cmgr-pay input{width:120px}
+  .cmgr-sub{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:0 0 8px;font-weight:700}
+  .lrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .lrow .lin{background-color:var(--panel)}
+  .lrow input.lin{flex:1;min-width:90px}
+  .lrow .lplatsel{flex:0 0 130px}
+  .lx{margin-left:2px;color:var(--muted);cursor:pointer;font-size:16px}.lx:hover{color:var(--red)}
+  .addrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .addrow input,.addrow select{flex:1;min-width:120px}
+  .addlink{margin-top:10px}
+  .ghostbtn{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:9px 13px;font-weight:600;cursor:pointer}
+  /* modern button hover: naturally dark → grows & flips white with black text */
+  button.primary,.ghostbtn,.icon-btn,.chip{
+    transition:transform .16s cubic-bezier(.2,.7,.3,1),background-color .16s ease,color .16s ease,box-shadow .16s ease,border-color .16s ease;
+    will-change:transform}
+  button.primary:hover,.ghostbtn:hover,.icon-btn:hover,.chip:hover{
+    background:#fff;color:#111;border-color:#fff;transform:scale(1.06);box-shadow:0 8px 22px rgba(0,0,0,.30);filter:none}
+  button.primary:active,.ghostbtn:active,.icon-btn:active,.chip:active{transform:scale(.96)}
+  /* animated rainbow OUTLINE tracing the button edge on hover */
+  @property --bang{syntax:"<angle>";initial-value:0deg;inherits:false}
+  button.primary,.ghostbtn,.icon-btn,.chip{position:relative;z-index:0}
+  button.primary::before,.ghostbtn::before,.icon-btn::before,.chip::before{
+    content:"";position:absolute;inset:-1.5px;border-radius:inherit;z-index:-1;opacity:0;padding:1.25px;
+    background:conic-gradient(from var(--bang),#ff004c,#ff8a00,#ffe600,#28ff00,#00e1ff,#5b6bff,#d400ff,#ff004c);
+    -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;
+    mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask-composite:exclude;
+    transition:opacity .2s ease;animation:huebang 2.6s linear infinite}
+  button.primary:hover::before,.ghostbtn:hover::before,.icon-btn:hover::before,.chip:hover::before{opacity:1}
+  @keyframes huebang{to{--bang:360deg}}
+</style>
+</head>
+<body>
+<header>
+  <h1><i class="logo"></i>UNCVRD <span class="grad">Ad Tracker</span></h1>
+  <nav class="dnav">
+    <button class="dtab active" data-dview="overview">Overview</button>
+    <button class="dtab" data-dview="creators">Creators</button>
+  </nav>
+  <div class="controls">
+    <button id="themeBtn" class="icon-btn" title="Toggle light / dark mode">🌙</button>
+    <label class="muted" style="font-size:12px">SCALE ≥</label>
+    <input id="scale" type="number" step="0.1" value="2.0" style="width:64px">
+    <label class="muted" style="font-size:12px">CUT &lt;</label>
+    <input id="cut" type="number" step="0.1" value="1.0" style="width:64px">
+    <select id="source">
+      <option value="sample">Sample data</option>
+      <option value="supabase">Live (Supabase)</option>
+      <option value="csv">CSV upload</option>
+    </select>
+    <input id="csvfile" type="file" accept=".csv" style="display:none">
+    <button id="csvbtn" style="display:none">Choose CSV…</button>
+  </div>
+</header>
+
+<main>
+<div id="view-overview">
+  <div id="connpanel" class="card mb" style="display:none">
+    <h2>Connect your Supabase mirror</h2>
+    <div class="src-note">Reads <code>ad_daily_log</code>. Uses your project's <b>anon</b> key (read-only). Nothing is stored — it lives only in this tab.</div>
+    <div class="conn">
+      <input id="suUrl" placeholder="https://xxxx.supabase.co">
+      <input id="suKey" placeholder="anon key">
+      <button class="primary" id="suGo">Load</button>
+    </div>
+    <div id="suMsg" class="src-note" style="margin-top:8px"></div>
+  </div>
+
+  <div class="grid kpis" id="kpis"></div>
+
+  <div class="grid cols3 mb">
+    <div class="card">
+      <h2>Today's calls — what to scale &amp; cut</h2>
+      <div id="actions"></div>
+    </div>
+    <div class="card">
+      <h2>Profit vs salary</h2>
+      <canvas id="creatorChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card mb">
+    <h2>Variant leaderboard</h2>
+    <table id="variantTable">
+      <thead><tr>
+        <th>Variant</th><th>Creator</th><th>Platform</th><th>Spend</th><th>Clicks</th>
+        <th>New Fans</th><th>Revenue</th><th>CAC</th><th>LTV</th><th>ROAS</th><th>Profit</th><th>Call</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div class="grid cols mb">
+    <div class="card"><h2>Spend vs revenue by variant</h2><canvas id="varChart"></canvas></div>
+    <div class="card">
+      <h2>Platform summary</h2>
+      <table id="platTable">
+        <thead><tr><th>Platform</th><th>Spend</th><th>Clicks</th><th>New Fans</th><th>Revenue</th><th>CPC</th><th>CAC</th><th>ROAS</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <details class="card">
+    <summary>How the numbers work</summary>
+    <p class="src-note">Each row is one ad/variant/day. <b>CPC</b>=spend÷clicks, <b>CAC</b>=spend÷new&nbsp;fans,
+    <b>LTV</b>=revenue÷new&nbsp;fans, <b>ROAS</b>=revenue÷spend, <b>Profit</b>=revenue−spend.
+    The call is <b class="pos">SCALE</b> when ROAS ≥ the scale threshold, <b class="neg">CUT</b> when ROAS &lt; the cut threshold,
+    otherwise <span style="color:var(--amber)">KEEP</span>. Net profit = ad profit − the creator's pay (salary or %).</p>
+  </details>
+</div><!-- /view-overview -->
+
+<div id="view-creators" hidden>
+  <div class="card mb">
+    <h2>Creators</h2>
+    <div class="src-note" style="margin-bottom:14px">Add creators, set a monthly salary or a revenue %, and manage their tracking links. Salary/% drives the net-profit math on the Overview. Saved in this browser.</div>
+    <div id="creatorMgr"></div>
+  </div>
+  <div class="card">
+    <h2>Add a creator</h2>
+    <div class="addrow">
+      <select id="ncPick"><option value="">Choose a creator…</option></select>
+      <input id="ncSalary" type="number" min="0" placeholder="Salary $/mo">
+      <input id="ncPct" type="number" min="0" max="100" placeholder="or revenue %">
+      <button class="primary" id="ncAdd">+ Add creator</button>
+    </div>
+    <div class="src-note" style="margin-top:8px">Set a monthly salary <b>or</b> a revenue % — if % is filled, it's used as their pay in the profit math.</div>
+  </div>
+</div><!-- /view-creators -->
+</main>
+
+<script>
+// ── sample data (mirrors UNCVRD_Ad_Tracker.xlsx) ───────────────────────────
+const SAMPLE = [
+  ["2026-06-05","OnlyFinder","Marissa","jun-launch","profile pic A","marissa-pic-a",40,120,9,180],
+  ["2026-06-05","OnlyFinder","Marissa","jun-launch","profile pic B","marissa-pic-b",40,95,4,60],
+  ["2026-06-05","Meta","Emma","jun-launch","hook: shy","emma-hook-shy",60,80,6,140],
+  ["2026-06-05","Meta","Emma","jun-launch","hook: bold","emma-hook-bold",60,150,5,70],
+  ["2026-06-05","OnlyFinder","Maylee","jun-launch","keyword: gym","maylee-gym",25,90,11,320],
+  ["2026-06-05","OnlyFinder","Maylee","jun-launch","keyword: beach","maylee-beach",25,70,3,40],
+  ["2026-06-06","OnlyFinder","Marissa","jun-launch","profile pic A","marissa-pic-a",45,130,10,210],
+  ["2026-06-06","OnlyFinder","Marissa","jun-launch","profile pic B","marissa-pic-b",30,70,2,25],
+  ["2026-06-06","Meta","Emma","jun-launch","hook: shy","emma-hook-shy",65,85,7,175],
+  ["2026-06-06","Meta","Emma","jun-launch","hook: bold","emma-hook-bold",50,120,4,55],
+  ["2026-06-06","OnlyFinder","Maylee","jun-launch","keyword: gym","maylee-gym",30,100,13,360],
+  ["2026-06-06","OnlyFinder","Maylee","jun-launch","keyword: beach","maylee-beach",20,60,2,30],
+].map(r => ({date:r[0],platform:r[1],creator:r[2],campaign:r[3],test:r[4],variant:r[5],
+             spend:r[6],clicks:r[7],new_fans:r[8],revenue:r[9]}));
+
+// Editable creator roster (managed on the Creators tab; persisted per-browser).
+function loadCreators(){
+  try{ const j=JSON.parse(localStorage.getItem("ad_creators")); if(Array.isArray(j)) return j; }catch(e){}
+  return [];
+}
+let CREATORS = loadCreators();
+function saveCreators(){ localStorage.setItem("ad_creators", JSON.stringify(CREATORS)); }
+function findCreator(name){ return CREATORS.find(c=>c.name.toLowerCase()===String(name).toLowerCase()); }
+function creatorCost(name, revenue){ const c=findCreator(name); if(!c) return 0; return (+c.pct>0) ? revenue*(+c.pct)/100 : (+c.salary||0); }
+function payLabel(c){ return (+c.pct>0) ? (c.pct+"% of revenue") : money(+c.salary||0)+"/mo"; }
+
+let DATA = SAMPLE;
+let charts = {};
+
+const money = n => (n<0?"-$":"$") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0});
+const money2 = n => isFinite(n)? (n<0?"-$":"$")+Math.abs(n).toFixed(2) : "—";
+const pct = n => isFinite(n)? (n*100).toFixed(1)+"%" : "—";
+const mult = n => isFinite(n)? n.toFixed(2)+"x" : "—";
+const sum = (a,k) => a.reduce((s,r)=>s+(+r[k]||0),0);
+const thresholds = () => ({scale:+document.getElementById("scale").value||2, cut:+document.getElementById("cut").value||1});
+
+function verdict(spend, revenue){
+  if(!spend) return "";
+  const roas = revenue/spend; const {scale,cut} = thresholds();
+  return roas>=scale ? "SCALE" : roas<cut ? "CUT" : "KEEP";
+}
+function groupBy(rows, key){
+  const m = new Map();
+  for(const r of rows){ const k=r[key]; if(!m.has(k)) m.set(k,[]); m.get(k).push(r); }
+  return m;
+}
+function agg(rows){
+  const spend=sum(rows,"spend"), clicks=sum(rows,"clicks"),
+        fans=sum(rows,"new_fans"), revenue=sum(rows,"revenue");
+  return {spend,clicks,fans,revenue,profit:revenue-spend,
+    cpc:spend/clicks, cac:spend/fans, ltv:revenue/fans, roas:revenue/spend,
+    verdict:verdict(spend,revenue)};
+}
+
+function render(){
+  renderKpis(); renderActions(); renderVariants(); renderPlatforms();
+  renderVarChart(); renderCreatorChart();
+}
+
+function renderKpis(){
+  const a = agg(DATA);
+  const cards = [
+    ["Spend", money(a.spend), DATA.length+" rows"],
+    ["Revenue", money(a.revenue), ""],
+    ["Profit", money(a.profit), a.profit>=0?"in the black":"in the red", a.profit>=0?"pos":"neg"],
+    ["Blended ROAS", mult(a.roas), ""],
+    ["New Fans", a.fans.toLocaleString(), money2(a.cac)+" CAC"],
+    ["LTV / fan", money2(a.ltv), ""],
+  ];
+  document.getElementById("kpis").innerHTML = cards.map(c=>`
+    <div class="card kpi"><div class="label">${c[0]}</div>
+    <div class="val ${c[4]||''}">${c[1]}</div><div class="sub">${c[2]||''}</div></div>`).join("");
+}
+
+function variantRows(){
+  const out = [];
+  for(const [v,rows] of groupBy(DATA,"variant")){
+    const a = agg(rows);
+    out.push({variant:v, creator:rows[0].creator, platform:rows[0].platform, ...a});
+  }
+  return out.sort((x,y)=>y.profit-x.profit);
+}
+
+function renderActions(){
+  const vr = variantRows();
+  const scale = vr.filter(v=>v.verdict==="SCALE").sort((a,b)=>b.profit-a.profit);
+  const cut = vr.filter(v=>v.verdict==="CUT").sort((a,b)=>a.profit-b.profit);
+  const cutBudget = cut.reduce((s,v)=>s+v.spend,0);
+  let html = "";
+  scale.slice(0,4).forEach(v=>{ html += action("var(--green)",
+    `<b>Scale ${v.variant}</b> <span class="muted">(${v.creator})</span>`,
+    `${mult(v.roas)} ROAS · ${money(v.profit)} profit · ${money2(v.cac)} CAC`); });
+  cut.slice(0,4).forEach(v=>{ html += action("var(--red)",
+    `<b>Cut ${v.variant}</b> <span class="muted">(${v.creator})</span>`,
+    `${mult(v.roas)} ROAS · losing ${money(-v.profit)}`); });
+  if(cutBudget>0 && scale.length){
+    html += action("var(--accent)", `<b>Reallocate ${money(cutBudget)}</b>`,
+      `Move the CUT budget into ${scale[0].variant} — your best ROAS at ${mult(scale[0].roas)}.`);
+  }
+  if(!html) html = `<div class="muted">No clear calls yet — add more data.</div>`;
+  document.getElementById("actions").innerHTML = html;
+}
+function action(color,title,sub){
+  return `<div class="action"><div class="dot" style="background:${color}"></div>
+    <div><div>${title}</div><div class="src-note">${sub}</div></div></div>`;
+}
+
+function renderVariants(){
+  const tb = document.querySelector("#variantTable tbody");
+  tb.innerHTML = variantRows().map(v=>`<tr>
+    <td>${v.variant}</td><td>${v.creator}</td><td>${v.platform}</td>
+    <td>${money(v.spend)}</td><td>${v.clicks}</td><td>${v.fans}</td><td>${money(v.revenue)}</td>
+    <td>${money2(v.cac)}</td><td>${money2(v.ltv)}</td><td>${mult(v.roas)}</td>
+    <td class="${v.profit>=0?'pos':'neg'}">${money(v.profit)}</td>
+    <td>${v.verdict?`<span class="badge b-${v.verdict}">${v.verdict}</span>`:''}</td></tr>`).join("");
+}
+
+function renderPlatforms(){
+  const tb = document.querySelector("#platTable tbody");
+  const order = ["Meta","OnlyFinder","OnlyGuider","OnlySeeker"];
+  const present = [...groupBy(DATA,"platform").keys()];
+  const plats = [...new Set([...order.filter(p=>present.includes(p)), ...present])];
+  tb.innerHTML = plats.map(p=>{
+    const a = agg(DATA.filter(r=>r.platform===p));
+    return `<tr><td>${p||'—'}</td><td>${money(a.spend)}</td><td>${a.clicks}</td><td>${a.fans}</td>
+      <td>${money(a.revenue)}</td><td>${money2(a.cpc)}</td><td>${money2(a.cac)}</td><td>${mult(a.roas)}</td></tr>`;
+  }).join("");
+}
+
+function destroy(id){ if(charts[id]){ charts[id].destroy(); delete charts[id]; } }
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+function renderVarChart(){
+  destroy("varChart");
+  const vr = variantRows();
+  charts.varChart = new Chart(document.getElementById("varChart"),{
+    type:"bar",
+    data:{labels:vr.map(v=>v.variant),
+      datasets:[
+        {label:"Spend",data:vr.map(v=>v.spend),backgroundColor:"#5a4bce"},
+        {label:"Revenue",data:vr.map(v=>v.revenue),backgroundColor:"#37d399"}]},
+    options:chartOpts()
+  });
+}
+function renderCreatorChart(){
+  destroy("creatorChart");
+  const labels=[], net=[], colors=[];
+  for(const [c,rows] of groupBy(DATA,"creator")){
+    const a = agg(rows); const n = a.profit - creatorCost(c, a.revenue);
+    labels.push(c); net.push(n); colors.push(n>=0?"#37d399":"#f06a6a");
+  }
+  charts.creatorChart = new Chart(document.getElementById("creatorChart"),{
+    type:"bar",
+    data:{labels,datasets:[{label:"Net profit (ad profit − salary)",data:net,backgroundColor:colors}]},
+    options:chartOpts()
+  });
+}
+function chartOpts(){
+  const tick = cssVar("--chart-tick") || "#8b94a5";
+  const grid = cssVar("--chart-grid") || "rgba(255,255,255,.07)";
+  return {responsive:true,plugins:{legend:{labels:{color:tick,boxWidth:12}}},
+    scales:{x:{ticks:{color:tick},grid:{color:grid}},y:{ticks:{color:tick},grid:{color:grid}}}};
+}
+
+// ── data sources ────────────────────────────────────────────────────────────
+document.getElementById("source").addEventListener("change", e=>{
+  const v = e.target.value;
+  document.getElementById("connpanel").style.display = v==="supabase"?"block":"none";
+  document.getElementById("csvbtn").style.display = v==="csv"?"inline-block":"none";
+  if(v==="sample"){ DATA = SAMPLE; render(); }
+  if(v==="live"){ loadLive(); }
+});
+["scale","cut"].forEach(id=>document.getElementById(id).addEventListener("input", render));
+
+// Supabase
+document.getElementById("suGo").addEventListener("click", async ()=>{
+  const url = document.getElementById("suUrl").value.trim().replace(/\/$/,"");
+  const key = document.getElementById("suKey").value.trim();
+  const msg = document.getElementById("suMsg");
+  if(!url||!key){ msg.textContent="Enter both the project URL and the anon key."; return; }
+  msg.textContent = "Loading…";
+  try{
+    const res = await fetch(`${url}/rest/v1/ad_daily_log?select=*&order=date.asc`,
+      {headers:{apikey:key, Authorization:"Bearer "+key}});
+    if(!res.ok) throw new Error("HTTP "+res.status+" "+(await res.text()).slice(0,120));
+    const rows = await res.json();
+    if(!rows.length){ msg.textContent="Connected, but ad_daily_log is empty."; return; }
+    DATA = rows.map(r=>({date:r.date,platform:r.platform,creator:r.creator,campaign:r.campaign,
+      test:r.test,variant:r.variant,spend:+r.spend,clicks:+r.clicks,new_fans:+r.new_fans,revenue:+r.revenue}));
+    msg.textContent = `Loaded ${rows.length} rows.`;
+    render();
+  }catch(err){ msg.textContent = "Failed: "+err.message; }
+});
+
+// CSV upload (export Daily Log as CSV from the Sheet)
+document.getElementById("csvbtn").addEventListener("click",()=>document.getElementById("csvfile").click());
+document.getElementById("csvfile").addEventListener("change", ev=>{
+  const file = ev.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e=>{ DATA = parseCsv(e.target.result); render(); };
+  reader.readAsText(file);
+});
+function parseCsv(text){
+  const lines = text.split(/\r?\n/).filter(l=>l.trim());
+  const head = splitCsv(lines[0]).map(h=>h.trim().toLowerCase());
+  const idx = name => head.findIndex(h=>h.replace(/[^a-z]/g,"").includes(name));
+  const iDate=idx("date"),iPlat=idx("platform"),iCre=idx("creator"),iCamp=idx("campaign"),
+        iTest=idx("test"),iVar=idx("variant"),iSpend=idx("spend"),iClick=idx("click"),
+        iFan=idx("newfans"),iRev=idx("revenue");
+  const out=[];
+  for(let i=1;i<lines.length;i++){
+    const c = splitCsv(lines[i]);
+    if(!c[iDate]) continue;
+    out.push({date:c[iDate],platform:c[iPlat]||"",creator:c[iCre]||"",campaign:c[iCamp]||"",
+      test:c[iTest]||"",variant:c[iVar]||"",spend:+c[iSpend]||0,clicks:+c[iClick]||0,
+      new_fans:+c[iFan]||0,revenue:+c[iRev]||0});
+  }
+  return out;
+}
+function splitCsv(line){
+  const out=[]; let cur="",q=false;
+  for(let i=0;i<line.length;i++){const ch=line[i];
+    if(ch==='"'){ if(q&&line[i+1]==='"'){cur+='"';i++;} else q=!q; }
+    else if(ch===','&&!q){ out.push(cur); cur=""; }
+    else cur+=ch; }
+  out.push(cur); return out;
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+// ── theme (light / dark) ────────────────────────────────────────────────────
+function setTheme(t, rerender){
+  document.documentElement.setAttribute("data-theme", t);
+  const b = document.getElementById("themeBtn");
+  if(b) b.textContent = t === "light" ? "☀️" : "🌙";
+  localStorage.setItem("ad_theme", t);
+  if(rerender){ renderVarChart(); renderCreatorChart(); }
+}
+document.getElementById("themeBtn").addEventListener("click", ()=>{
+  const cur = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  setTheme(cur === "light" ? "dark" : "light", true);
+});
+// ── Creators page (manage roster, pay, tracking links) ──────────────────────
+document.querySelectorAll(".dtab").forEach(t=>t.addEventListener("click",()=>{
+  document.querySelectorAll(".dtab").forEach(x=>x.classList.toggle("active", x===t));
+  const v=t.dataset.dview;
+  document.getElementById("view-overview").hidden = v!=="overview";
+  document.getElementById("view-creators").hidden = v!=="creators";
+}));
+function attr(s){ return String(s||"").replace(/"/g,"&quot;"); }
+function platOpts(sel){ return ["Meta","OnlyFinder","OnlyGuider","OnlySeeker"].map(p=>`<option ${p===(sel||"OnlyFinder")?"selected":""}>${p}</option>`).join(""); }
+function commit(rerenderPage){ saveCreators(); render(); if(rerenderPage!==false) renderCreators(); }
+function renderCreators(){
+  const wrap=document.getElementById("creatorMgr"); if(!wrap) return;
+  if(!CREATORS.length){ wrap.innerHTML='<div class="muted">No creators yet — add one below.</div>'; return; }
+  wrap.innerHTML = CREATORS.map((c,i)=>`
+    <div class="cmgr">
+      <div class="cmgr-head"><div class="cmgr-name">${escapeHtml(c.name)}</div><span class="cmgr-x" data-rm="${i}" title="remove creator">×</span></div>
+      <div class="cmgr-pay">
+        <label>Salary $/mo</label><input type="number" min="0" value="${+c.salary||0}" data-sal="${i}">
+        <label>or %</label><input type="number" min="0" max="100" value="${+c.pct||0}" data-pct="${i}">
+        <span class="src-note">current pay: ${payLabel(c)}</span>
+      </div>
+      <div class="cmgr-sub">Tracking links</div>
+      ${(c.links||[]).map((l,j)=>`<div class="lrow"><input class="lin" value="${attr(l.name)}" data-elname="${i}.${j}"><select class="lin lplatsel" data-elplat="${i}.${j}">${platOpts(l.platform)}</select><input class="lin" value="${attr(l.url||"")}" placeholder="URL (optional)" data-elurl="${i}.${j}"><span class="lx" data-rml="${i}.${j}" title="remove link">×</span></div>`).join("") || '<div class="muted" style="font-size:12.5px">No links yet.</div>'}
+      <div class="addrow addlink">
+        <input placeholder="Link / variant name" data-lname="${i}">
+        <select class="lplatsel" data-lplat="${i}">${platOpts("OnlyFinder")}</select>
+        <input placeholder="URL (optional)" data-lurl="${i}">
+        <button class="ghostbtn" data-addl="${i}">+ Link</button>
+      </div>
+    </div>`).join("");
+  wrap.querySelectorAll("[data-rm]").forEach(el=>el.addEventListener("click",()=>{ CREATORS.splice(+el.dataset.rm,1); commit(); syncSelection(); loadCreatorOptions(); }));
+  wrap.querySelectorAll("[data-sal]").forEach(el=>el.addEventListener("change",()=>{ CREATORS[+el.dataset.sal].salary=+el.value||0; commit(false); }));
+  wrap.querySelectorAll("[data-pct]").forEach(el=>el.addEventListener("change",()=>{ CREATORS[+el.dataset.pct].pct=+el.value||0; commit(); }));
+  wrap.querySelectorAll("[data-addl]").forEach(el=>el.addEventListener("click",()=>{
+    const i=+el.dataset.addl;
+    const name=wrap.querySelector('[data-lname="'+i+'"]').value.trim();
+    if(!name) return;
+    const platform=wrap.querySelector('[data-lplat="'+i+'"]').value;
+    const url=wrap.querySelector('[data-lurl="'+i+'"]').value.trim();
+    (CREATORS[i].links=CREATORS[i].links||[]).push({name,platform,url});
+    commit();
+  }));
+  wrap.querySelectorAll("[data-rml]").forEach(el=>el.addEventListener("click",()=>{
+    const p=el.dataset.rml.split("."); CREATORS[+p[0]].links.splice(+p[1],1); commit();
+  }));
+  // edit an existing link in place (name / platform / url)
+  const editLink=(ds,field)=>el=>el.addEventListener("change",()=>{
+    const p=el.dataset[ds].split("."); CREATORS[+p[0]].links[+p[1]][field]=el.value; commit(false);
+  });
+  wrap.querySelectorAll("[data-elname]").forEach(editLink("elname","name"));
+  wrap.querySelectorAll("[data-elplat]").forEach(editLink("elplat","platform"));
+  wrap.querySelectorAll("[data-elurl]").forEach(editLink("elurl","url"));
+}
+document.getElementById("ncAdd").addEventListener("click",()=>{
+  const sel=document.getElementById("ncPick"); const id=sel.value;
+  if(!id){ alert("Choose a creator from the list first."); return; }
+  const name=sel.options[sel.selectedIndex].textContent;
+  if(CREATORS.find(c=>c.accountId===id) || findCreator(name)){ alert("That creator is already added."); return; }
+  CREATORS.push({name, accountId:id, salary:+document.getElementById("ncSalary").value||0, pct:+document.getElementById("ncPct").value||0, links:[]});
+  document.getElementById("ncSalary").value=""; document.getElementById("ncPct").value="";
+  commit(); syncSelection(); loadCreatorOptions();
+});
+// Sync the chosen creators to the app (which ones to pull OnlyFans data for),
+// and fill the "choose a creator" dropdown from the connected accounts.
+async function syncSelection(){
+  const ids=CREATORS.map(c=>c.accountId).filter(Boolean);
+  try{ await fetch("/config",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({selected_accounts:ids})}); }catch(e){}
+  if(typeof loadLive==="function") loadLive();
+}
+async function loadCreatorOptions(){
+  const sel=document.getElementById("ncPick"); if(!sel) return;
+  try{
+    const d=await (await fetch("/of-accounts")).json();
+    const have=new Set(CREATORS.map(c=>c.accountId).filter(Boolean));
+    const avail=(d.accounts||[]).filter(a=>a.authed && !have.has(a.id));
+    sel.innerHTML='<option value="">Choose a creator…</option>'+avail.map(a=>'<option value="'+a.id+'">'+escapeHtml(a.name)+'</option>').join("");
+  }catch(e){ sel.innerHTML='<option value="">Open the app to pick creators</option>'; }
+}
+
+// accept theme from the parent app (when embedded in the Ad Suite), and hide
+// our own toggle in that case so there's a single control.
+window.addEventListener("message", e=>{
+  if(!e || !e.data) return;
+  if(e.data.type === "theme") setTheme(e.data.theme, true);
+  if(e.data.type === "reload") loadLive();
+  if(e.data.type === "dview"){
+    document.querySelectorAll(".dtab").forEach(x=>x.classList.toggle("active", x.dataset.dview===e.data.view));
+    document.getElementById("view-overview").hidden = e.data.view!=="overview";
+    document.getElementById("view-creators").hidden = e.data.view!=="creators";
+  }
+});
+if(window.self !== window.top){
+  // Embedded in the Ad Suite: drop our own header (the app's single header drives
+  // nav) and relocate the SCALE/CUT/source controls into the Overview body.
+  const hd=document.querySelector("header"); if(hd) hd.style.display="none";
+  const tb=document.getElementById("themeBtn"); if(tb) tb.remove();
+  const ctrls=document.querySelector(".controls");
+  if(ctrls){
+    const bar=document.createElement("div"); bar.className="embed-controls"; bar.appendChild(ctrls);
+    const ov=document.getElementById("view-overview"); ov.insertBefore(bar, ov.firstChild);
+  }
+}
+setTheme(localStorage.getItem("ad_theme") || "dark", false);
+
+// Live data from the app's OnlyFans auto-sync (works when served by the app).
+async function loadLive(){
+  try{
+    const r=await fetch("/livedata"); if(!r.ok) return false;
+    const d=await r.json();
+    if(d && d.rows && d.rows.length){
+      DATA = d.rows.map(x=>({date:x.date,platform:x.platform||"",creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:x.variant||"",spend:+x.spend||0,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0}));
+      const sel=document.getElementById("source");
+      if(sel && !sel.querySelector('option[value="live"]')){ const o=document.createElement("option"); o.value="live"; o.textContent="Live (OnlyFans)"; sel.insertBefore(o, sel.firstChild); }
+      if(sel) sel.value="live";
+      render(); return true;
+    }
+  }catch(e){}
+  return false;
+}
+render();
+renderCreators();
+loadCreatorOptions();
+// push this browser's creator selection to the server, then load live data
+if(typeof syncSelection==="function"){ syncSelection(); } else { loadLive(); }
+</script>
+</body>
+</html>
