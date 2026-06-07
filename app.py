@@ -170,10 +170,51 @@ def _of_links(aid):
     return []
 
 
+def _norm(s):
+    """Loose key for matching a Meta campaign name to an OF tracking link."""
+    return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
+
+def meta_spend_map():
+    """Today's ad spend per campaign from the Meta Marketing API, keyed by a
+    normalized campaign name so we can join it to OnlyFans tracking links.
+    Returns {} (and never raises) unless META_TOKEN + META_AD_ACCT are set —
+    so the whole feature stays dark until your boss adds his token."""
+    token = CONFIG.get("meta_token") or ""
+    acct = CONFIG.get("meta_ad_acct") or ""
+    if not token or not acct:
+        return {}
+    if not acct.startswith("act_"):
+        acct = "act_" + acct
+    today = datetime.date.today().isoformat()
+    params = urllib.parse.urlencode({
+        "level": "campaign",
+        "fields": "campaign_name,spend",
+        "time_range": json.dumps({"since": today, "until": today}),
+        "limit": "500",
+        "access_token": token,
+    })
+    url = "https://graph.facebook.com/v19.0/%s/insights?%s" % (acct, params)
+    out = {}
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=45) as r:
+            d = json.load(r)
+        for row in (d.get("data") or []):
+            k = _norm(row.get("campaign_name"))
+            if k:
+                out[k] = out.get(k, 0.0) + float(row.get("spend") or 0)
+    except Exception as e:
+        LIVE["meta_error"] = str(e)
+        return {}
+    LIVE["meta_error"] = None
+    return out
+
+
 def sync_onlyfans():
     """Pull every authenticated account's tracking links into live rows the
     dashboard + analyst read. Backend (clicks / new fans / revenue) is live;
-    spend stays 0 until Meta/OnlyFinder is added (your boss's part)."""
+    spend is joined from Meta when META_TOKEN is set, else stays 0."""
     try:
         accts = _of_accounts()
     except Exception as e:
@@ -181,6 +222,7 @@ def sync_onlyfans():
         return {"rows": LIVE.get("rows", []), "at": LIVE.get("at"), "error": str(e)}
     today = datetime.date.today().isoformat()
     selected = set(CONFIG.get("selected_accounts") or [])
+    spend_map = meta_spend_map()  # {} unless boss's Meta token is set
     rows = []
     for a in accts:
         if not a.get("is_authenticated"):
@@ -195,11 +237,12 @@ def sync_onlyfans():
         for l in links:
             name = l.get("campaignName") or ("c" + str(l.get("campaignCode") or ""))
             rev = (l.get("revenue") or {}).get("total") or 0
+            spend = spend_map.get(_norm(name), 0)  # join Meta spend by campaign name
             rows.append({
                 "date": today, "platform": "", "creator": creator,
                 "campaign": name, "test": "", "variant": name, "of_link": name,
                 "code": str(l.get("campaignCode") or ""),
-                "spend": 0, "clicks": int(l.get("clicksCount") or 0),
+                "spend": float(spend), "clicks": int(l.get("clicksCount") or 0),
                 "new_fans": int(l.get("subscribersCount") or 0), "revenue": float(rev),
             })
     LIVE["rows"] = rows

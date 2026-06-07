@@ -55,6 +55,10 @@
   .b-KEEP{background:rgba(242,193,78,.15);color:var(--amber)}
   .b-CUT{background:rgba(240,106,106,.15);color:var(--red)}
   .pos{color:var(--green)} .neg{color:var(--red)}
+  td.flag{color:#fff;background:rgba(255,77,79,.18);font-weight:700;box-shadow:inset 3px 0 0 var(--red)}
+  .sync-pill{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--border);color:var(--muted);white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+  .sync-pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+  .sync-pill.ok{color:#22c55e} .sync-pill.err{color:var(--red)} .sync-pill.idle{color:var(--muted)}
   .action{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line)}
   .action:last-child{border-bottom:none}
   .dot{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:0 0 auto}
@@ -159,11 +163,16 @@
     <button class="dtab" data-dview="creators">Creators</button>
   </nav>
   <div class="controls">
+    <span id="syncPill" class="sync-pill" title="OnlyFans data freshness">…</span>
     <button id="themeBtn" class="icon-btn" title="Toggle light / dark mode">🌙</button>
     <label class="muted" style="font-size:12px">SCALE ≥</label>
     <input id="scale" type="number" step="0.1" value="2.0" style="width:64px">
     <label class="muted" style="font-size:12px">CUT &lt;</label>
     <input id="cut" type="number" step="0.1" value="1.0" style="width:64px">
+    <label class="muted" style="font-size:12px">CVR ≥%</label>
+    <input id="cvrTarget" type="number" step="1" value="25" style="width:58px" title="target conversion rate (click→sub)">
+    <label class="muted" style="font-size:12px">CPC ≤$</label>
+    <input id="cpcTarget" type="number" step="0.05" value="0.70" style="width:62px" title="target cost per click">
     <select id="source">
       <option value="sample">Sample data</option>
       <option value="supabase">Live (Supabase)</option>
@@ -208,7 +217,7 @@
     <table id="variantTable">
       <thead><tr>
         <th>Variant</th><th>Creator</th><th>Platform</th><th>Spend</th><th>Clicks</th>
-        <th>New Fans</th><th>Revenue</th><th>CAC</th><th>LTV</th><th>ROAS</th><th>Profit</th><th>Call</th>
+        <th>New Fans</th><th>CVR</th><th>CPC</th><th>Revenue</th><th>CAC</th><th>LTV</th><th>ROAS</th><th>Profit</th><th>Call</th>
       </tr></thead>
       <tbody></tbody>
     </table>
@@ -221,7 +230,7 @@
       <h2>Platform summary</h2>
       <div class="tscroll">
       <table id="platTable">
-        <thead><tr><th>Platform</th><th>Spend</th><th>Clicks</th><th>New Fans</th><th>Revenue</th><th>CPC</th><th>CAC</th><th>ROAS</th></tr></thead>
+        <thead><tr><th>Platform</th><th>Spend</th><th>Clicks</th><th>New Fans</th><th>CVR</th><th>Revenue</th><th>CPC</th><th>CAC</th><th>ROAS</th></tr></thead>
         <tbody></tbody>
       </table>
       </div>
@@ -230,8 +239,9 @@
 
   <details class="card">
     <summary>How the numbers work</summary>
-    <p class="src-note">Each row is one ad/variant/day. <b>CPC</b>=spend÷clicks, <b>CAC</b>=spend÷new&nbsp;fans,
+    <p class="src-note">Each row is one ad/variant/day. <b>CVR</b>=new&nbsp;fans÷clicks, <b>CPC</b>=spend÷clicks, <b>CAC</b>=spend÷new&nbsp;fans,
     <b>LTV</b>=revenue÷new&nbsp;fans, <b>ROAS</b>=revenue÷spend, <b>Profit</b>=revenue−spend.
+    <span class="flag" style="padding:1px 5px;border-radius:4px">Red</span> = CVR under your target (test a split) or CPC over target.
     The call is <b class="pos">SCALE</b> when ROAS ≥ the scale threshold, <b class="neg">CUT</b> when ROAS &lt; the cut threshold,
     otherwise <span style="color:var(--amber)">KEEP</span>. Net profit = ad profit − the creator's pay (salary or %).</p>
   </details>
@@ -309,9 +319,16 @@ function agg(rows){
   const spend=sum(rows,"spend"), clicks=sum(rows,"clicks"),
         fans=sum(rows,"new_fans"), revenue=sum(rows,"revenue");
   return {spend,clicks,fans,revenue,profit:revenue-spend,
-    cpc:spend/clicks, cac:spend/fans, ltv:revenue/fans, roas:revenue/spend,
+    cpc:spend/clicks, cac:spend/fans, ltv:revenue/fans, roas:revenue/spend, cvr:fans/clicks,
     verdict:verdict(spend,revenue)};
 }
+function targets(){
+  const cv=document.getElementById("cvrTarget"), cp=document.getElementById("cpcTarget");
+  return {cvr:((cv&&+cv.value)||25)/100, cpc:(cp&&+cp.value)||0.70};
+}
+// red if CVR below target (needs a split test); only meaningful with enough clicks
+function cvrBad(v){ const t=targets(); return v.clicks>=20 && isFinite(v.cvr) && v.cvr < t.cvr; }
+function cpcBad(v){ const t=targets(); return v.spend>0 && v.clicks>0 && isFinite(v.cpc) && v.cpc > t.cpc; }
 
 function render(){
   renderKpis(); renderActions(); renderVariants(); renderPlatforms();
@@ -358,6 +375,12 @@ function renderActions(){
     html += action("var(--accent)", `<b>Reallocate ${money(cutBudget)}</b>`,
       `Move the CUT budget into ${scale[0].variant} — your best ROAS at ${mult(scale[0].roas)}.`);
   }
+  // Needs-review: variants converting below target — candidates for a split test
+  const t = targets();
+  const lowCvr = vr.filter(cvrBad).sort((a,b)=>a.cvr-b.cvr);
+  lowCvr.slice(0,4).forEach(v=>{ html += action("#f59e0b",
+    `<b>Test a split: ${v.variant}</b> <span class="muted">(${v.creator})</span>`,
+    `CVR ${pct(v.cvr)} is under your ${(t.cvr*100).toFixed(0)}% target on ${v.clicks} clicks — try a new hook/creative.`); });
   if(!html) html = `<div class="muted">No clear calls yet — add more data.</div>`;
   document.getElementById("actions").innerHTML = html;
 }
@@ -370,7 +393,10 @@ function renderVariants(){
   const tb = document.querySelector("#variantTable tbody");
   tb.innerHTML = variantRows().map(v=>`<tr>
     <td>${v.variant}</td><td>${v.creator}</td><td>${v.platform}</td>
-    <td>${money(v.spend)}</td><td>${v.clicks}</td><td>${v.fans}</td><td>${money(v.revenue)}</td>
+    <td>${money(v.spend)}</td><td>${v.clicks}</td><td>${v.fans}</td>
+    <td class="${cvrBad(v)?'flag':''}">${pct(v.cvr)}</td>
+    <td class="${cpcBad(v)?'flag':''}">${v.spend>0?money2(v.cpc):'—'}</td>
+    <td>${money(v.revenue)}</td>
     <td>${money2(v.cac)}</td><td>${money2(v.ltv)}</td><td>${mult(v.roas)}</td>
     <td class="${v.profit>=0?'pos':'neg'}">${money(v.profit)}</td>
     <td>${v.verdict?`<span class="badge b-${v.verdict}">${v.verdict}</span>`:''}</td></tr>`).join("");
@@ -383,8 +409,10 @@ function renderPlatforms(){
   const plats = [...new Set([...order.filter(p=>present.includes(p)), ...present])];
   tb.innerHTML = plats.map(p=>{
     const a = agg(DATA.filter(r=>r.platform===p));
+    const t=targets(), cvrFlag=a.clicks>=20&&isFinite(a.cvr)&&a.cvr<t.cvr, cpcFlag=a.spend>0&&a.cpc>t.cpc;
     return `<tr><td>${p||'—'}</td><td>${money(a.spend)}</td><td>${a.clicks}</td><td>${a.fans}</td>
-      <td>${money(a.revenue)}</td><td>${money2(a.cpc)}</td><td>${money2(a.cac)}</td><td>${mult(a.roas)}</td></tr>`;
+      <td class="${cvrFlag?'flag':''}">${pct(a.cvr)}</td>
+      <td>${money(a.revenue)}</td><td class="${cpcFlag?'flag':''}">${a.spend>0?money2(a.cpc):'—'}</td><td>${money2(a.cac)}</td><td>${mult(a.roas)}</td></tr>`;
   }).join("");
 }
 
@@ -431,7 +459,7 @@ document.getElementById("source").addEventListener("change", e=>{
   if(v==="sample"){ DATA = SAMPLE; render(); }
   if(v==="live"){ loadLive(); }
 });
-["scale","cut"].forEach(id=>document.getElementById(id).addEventListener("input", render));
+["scale","cut","cvrTarget","cpcTarget"].forEach(id=>document.getElementById(id).addEventListener("input", render));
 
 // Supabase
 document.getElementById("suGo").addEventListener("click", async ()=>{
@@ -623,10 +651,17 @@ if(window.self !== window.top){
 setTheme(localStorage.getItem("ad_theme") || "dark", false);
 
 // Live data from the app's OnlyFans auto-sync (works when served by the app).
+function setSyncPill(state, text){
+  const p=document.getElementById("syncPill"); if(!p) return;
+  p.className="sync-pill "+state; p.textContent=text;
+}
 async function loadLive(){
   try{
-    const r=await fetch("/livedata"); if(!r.ok) return false;  // standalone file → keep sample
+    const r=await fetch("/livedata"); if(!r.ok){ setSyncPill("idle","Sample data"); return false; }  // standalone file → keep sample
     const d=await r.json();
+    if(d && d.error){ setSyncPill("err","Sync error"); }
+    else if(d && d.at){ setSyncPill("ok","Synced "+d.at.slice(11)); }
+    else { setSyncPill("idle","Not synced yet"); }
     const allRows = (d && d.rows) ? d.rows : [];
     // Only show the tracking links the boss picked per creator (not every OF link).
     const codesByCreator={}, platByKey={};
@@ -641,7 +676,7 @@ async function loadLive(){
     if(sel) sel.value="live";
     const note=document.getElementById("liveNote"); if(note) note.style.display = rows.length ? "none" : "block";
     render(); return true;
-  }catch(e){}
+  }catch(e){ setSyncPill("idle","Sample data"); }
   return false;
 }
 render();
