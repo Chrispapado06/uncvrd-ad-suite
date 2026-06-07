@@ -184,6 +184,8 @@
     <div id="suMsg" class="src-note" style="margin-top:8px"></div>
   </div>
 
+  <div id="liveNote" class="card mb" style="display:none">No creators selected yet — go to the <b>Creators</b> tab and add the creators you're running ads with. Their live numbers will appear here.</div>
+
   <div class="grid kpis" id="kpis"></div>
 
   <div class="grid cols3 mb">
@@ -603,15 +605,16 @@ setTheme(localStorage.getItem("ad_theme") || "dark", false);
 // Live data from the app's OnlyFans auto-sync (works when served by the app).
 async function loadLive(){
   try{
-    const r=await fetch("/livedata"); if(!r.ok) return false;
+    const r=await fetch("/livedata"); if(!r.ok) return false;  // standalone file → keep sample
     const d=await r.json();
-    if(d && d.rows && d.rows.length){
-      DATA = d.rows.map(x=>({date:x.date,platform:x.platform||"",creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:x.variant||"",spend:+x.spend||0,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0}));
-      const sel=document.getElementById("source");
-      if(sel && !sel.querySelector('option[value="live"]')){ const o=document.createElement("option"); o.value="live"; o.textContent="Live (OnlyFans)"; sel.insertBefore(o, sel.firstChild); }
-      if(sel) sel.value="live";
-      render(); return true;
-    }
+    const rows = (d && d.rows) ? d.rows : [];
+    // We're served by the app → live mode. Use real rows, or EMPTY (never the sample).
+    DATA = rows.map(x=>({date:x.date,platform:x.platform||"",creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:x.variant||"",spend:+x.spend||0,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0}));
+    const sel=document.getElementById("source");
+    if(sel && !sel.querySelector('option[value="live"]')){ const o=document.createElement("option"); o.value="live"; o.textContent="Live (OnlyFans)"; sel.insertBefore(o, sel.firstChild); }
+    if(sel) sel.value="live";
+    const note=document.getElementById("liveNote"); if(note) note.style.display = rows.length ? "none" : "block";
+    render(); return true;
   }catch(e){}
   return false;
 }
