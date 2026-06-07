@@ -519,8 +519,8 @@ function renderCreators(){
         <label>or %</label><input type="number" min="0" max="100" value="${+c.pct||0}" data-pct="${i}">
         <span class="src-note">current pay: ${payLabel(c)}</span>
       </div>
-      <div class="cmgr-sub">Tracking links</div>
-      ${(c.links||[]).map((l,j)=>`<div class="lrow"><input class="lin" value="${attr(l.name)}" data-elname="${i}.${j}"><select class="lin lplatsel" data-elplat="${i}.${j}">${platOpts(l.platform)}</select><input class="lin" value="${attr(l.url||"")}" placeholder="URL (optional)" data-elurl="${i}.${j}"><span class="lx" data-rml="${i}.${j}" title="remove link">×</span></div>`).join("") || '<div class="muted" style="font-size:12.5px">No links yet.</div>'}
+      <div class="cmgr-sub">Tracking links <span style="text-transform:none;letter-spacing:0;font-weight:400">— add one per platform (click + Link for each)</span></div>
+      ${(c.links||[]).map((l,j)=>`<div class="lrow"><input class="lin" value="${attr(l.name)}" data-elname="${i}.${j}"><select class="lin lplatsel" data-elplat="${i}.${j}">${platOpts(l.platform)}</select><input class="lin" value="${attr(l.url||"")}" placeholder="URL (optional)" data-elurl="${i}.${j}"><span class="lx" data-rml="${i}.${j}" title="remove link">×</span></div>`).join("") || '<div class="muted" style="font-size:12.5px">No links yet — add one for each platform below.</div>'}
       <div class="addrow addlink">
         <input placeholder="Link / variant name" data-lname="${i}">
         <select class="lplatsel" data-lplat="${i}">${platOpts("OnlyFinder")}</select>
