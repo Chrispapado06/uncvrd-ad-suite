@@ -15,6 +15,7 @@ Credentials are stored locally in credentials.json (git-ignored) — never uploa
 import base64
 import csv
 import datetime
+import hashlib
 import json
 import os
 import tempfile
@@ -40,6 +41,28 @@ DASHBOARD_PATH = next((p for p in [os.path.join(HERE, "dashboard.html"),
 MA_BETA = "managed-agents-2026-04-01"
 PORT = int(os.environ.get("PORT", "4000"))          # cloud hosts inject $PORT
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")    # set on the host → enables login
+SESSION_TOKEN = hashlib.sha256(("uncvrd-session:" + APP_PASSWORD).encode()).hexdigest()[:32]
+
+LOGIN_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>UNCVRD Ad Suite — Login</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b0d12;color:#e8ebf2;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+.box{background:#14171e;border:1px solid #262b36;border-radius:16px;padding:30px 26px;width:min(360px,92vw);box-shadow:0 12px 32px rgba(0,0,0,.5);text-align:center}
+.logo{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#7c5cff,#a78bfa);margin:0 auto 14px;box-shadow:0 2px 10px rgba(124,92,255,.4)}
+h1{font-size:20px;margin:0 0 4px;letter-spacing:-.2px}h1 span{background:linear-gradient(135deg,#7c5cff,#a78bfa);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+p{color:#8b94a5;font-size:13px;margin:0 0 18px}
+input{width:100%;background:#1b1f28;border:1px solid #262b36;border-radius:10px;color:#e8ebf2;padding:13px 14px;font-size:16px;margin-bottom:12px}
+input:focus{outline:none;border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.22)}
+button{width:100%;background:#7c5cff;border:0;border-radius:10px;color:#fff;font-weight:700;font-size:15px;padding:13px;cursor:pointer}
+button:active{transform:scale(.98)}.err{color:#f06a6a;font-size:13px;margin-bottom:12px}
+</style></head><body>
+<form class="box" method="post" action="/login">
+<div class="logo"></div>
+<h1>UNCVRD <span>Ad Suite</span></h1>
+<p>Enter the password to continue</p>
+<!--ERR-->
+<input type="password" name="password" placeholder="Password" autofocus autocomplete="current-password" inputmode="text">
+<button type="submit">Log in</button>
+</form></body></html>"""
 
 LIVE_COLS = ["date", "platform", "creator", "campaign", "test",
              "variant", "of_link", "spend", "clicks", "new_fans", "revenue"]
@@ -343,24 +366,26 @@ class Handler(BaseHTTPRequestHandler):
     def _authed(self):
         if not APP_PASSWORD:
             return True  # no password set (local) → open
-        h = self.headers.get("Authorization", "")
-        if h.startswith("Basic "):
-            try:
-                up = base64.b64decode(h[6:]).decode("utf-8", "ignore")
-                if up.split(":", 1)[-1] == APP_PASSWORD:
-                    return True
-            except Exception:
-                pass
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="UNCVRD Ad Suite"')
-        self.send_header("Content-Length", "0")
-        self.end_headers()
-        return False
+        return ("uncvrd_auth=" + SESSION_TOKEN) in self.headers.get("Cookie", "")
+
+    def _login(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length) if length else b""
+        pw = urllib.parse.parse_qs(raw.decode("utf-8", "ignore")).get("password", [""])[0]
+        if APP_PASSWORD and pw == APP_PASSWORD:
+            self.send_response(302)
+            self.send_header("Set-Cookie", "uncvrd_auth=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000" % SESSION_TOKEN)
+            self.send_header("Location", "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        else:
+            self._send(401, LOGIN_HTML.replace("<!--ERR-->", '<div class="err">Wrong password — try again.</div>'),
+                       "text/html; charset=utf-8")
 
     def do_GET(self):
-        if not self._authed():
-            return
         path = self.path.split("?", 1)[0]
+        if not self._authed():
+            return self._send(200, LOGIN_HTML, "text/html; charset=utf-8")
         if path == "/":
             return self._send(200, SHELL_HTML, "text/html; charset=utf-8")
         if path == "/dashboard":
@@ -394,8 +419,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path.split("?", 1)[0] == "/login":
+            return self._login()
         if not self._authed():
-            return
+            return self._send(401, {"error": "unauthorized"})
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length else b"{}"
         try:
