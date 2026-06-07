@@ -121,6 +121,9 @@
   .cmgr-sub{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:0 0 8px;font-weight:700}
   .lrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
   .lrow .lin{background-color:var(--panel)}
+  .lname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:12.5px}
+  .lpicksel{flex:1;min-width:0}
+  .lrow .lplatsel{flex:0 0 130px}
   .lrow input.lin{flex:1;min-width:90px}
   .lrow .lplatsel{flex:0 0 130px}
   .lx{margin-left:2px;color:var(--muted);cursor:pointer;font-size:16px}.lx:hover{color:var(--red)}
@@ -184,7 +187,7 @@
     <div id="suMsg" class="src-note" style="margin-top:8px"></div>
   </div>
 
-  <div id="liveNote" class="card mb" style="display:none">No creators selected yet — go to the <b>Creators</b> tab and add the creators you're running ads with. Their live numbers will appear here.</div>
+  <div id="liveNote" class="card mb" style="display:none">Nothing to show yet — on the <b>Creators</b> tab, add a creator and <b>pick the tracking links</b> you're running ads with. Their numbers will appear here.</div>
 
   <div class="grid kpis" id="kpis"></div>
 
@@ -508,6 +511,25 @@ document.querySelectorAll(".dtab").forEach(t=>t.addEventListener("click",()=>{
 function attr(s){ return String(s||"").replace(/"/g,"&quot;"); }
 function platOpts(sel){ return ["Meta","OnlyFinder","OnlyGuider","OnlySeeker"].map(p=>`<option ${p===(sel||"OnlyFinder")?"selected":""}>${p}</option>`).join(""); }
 function commit(rerenderPage){ saveCreators(); render(); if(rerenderPage!==false) renderCreators(); }
+// the real OnlyFans tracking links per creator account (for the picker)
+const OFLINKS={}, OFLOADING={};
+async function ensureOfLinks(accountId){
+  if(!accountId || OFLINKS[accountId]!==undefined || OFLOADING[accountId]) return;
+  OFLOADING[accountId]=true;
+  try{ const d=await (await fetch("/of-links?account="+encodeURIComponent(accountId))).json(); OFLINKS[accountId]=d.links||[]; }
+  catch(e){ OFLINKS[accountId]=[]; }
+  OFLOADING[accountId]=false; renderCreators();
+}
+function pickerOpts(accountId, existing){
+  if(!accountId) return '<option value="">Open the app to pick links</option>';
+  const list=OFLINKS[accountId];
+  if(list===undefined) return '<option value="">Loading the creator’s links…</option>';
+  const have=new Set((existing||[]).map(l=>String(l.code)));
+  const avail=list.filter(l=>!have.has(String(l.code)));
+  if(!list.length) return '<option value="">No tracking links on this account</option>';
+  if(!avail.length) return '<option value="">All links added</option>';
+  return '<option value="">Choose a tracking link…</option>'+avail.map(l=>`<option value="${attr(l.code)}" data-name="${attr(l.name)}">${escapeHtml(l.name)}${l.subs?(" · "+l.subs+" subs"):""}</option>`).join("");
+}
 function renderCreators(){
   const wrap=document.getElementById("creatorMgr"); if(!wrap) return;
   if(!CREATORS.length){ wrap.innerHTML='<div class="muted">No creators yet — add one below.</div>'; return; }
@@ -519,12 +541,11 @@ function renderCreators(){
         <label>or %</label><input type="number" min="0" max="100" value="${+c.pct||0}" data-pct="${i}">
         <span class="src-note">current pay: ${payLabel(c)}</span>
       </div>
-      <div class="cmgr-sub">Tracking links <span style="text-transform:none;letter-spacing:0;font-weight:400">— add one per platform (click + Link for each)</span></div>
-      ${(c.links||[]).map((l,j)=>`<div class="lrow"><input class="lin" value="${attr(l.name)}" data-elname="${i}.${j}"><select class="lin lplatsel" data-elplat="${i}.${j}">${platOpts(l.platform)}</select><input class="lin" value="${attr(l.url||"")}" placeholder="URL (optional)" data-elurl="${i}.${j}"><span class="lx" data-rml="${i}.${j}" title="remove link">×</span></div>`).join("") || '<div class="muted" style="font-size:12.5px">No links yet — add one for each platform below.</div>'}
+      <div class="cmgr-sub">Tracking links <span style="text-transform:none;letter-spacing:0;font-weight:400">— pick the OnlyFans links you run ads with, and set each one’s platform</span></div>
+      ${(c.links||[]).map((l,j)=>`<div class="lrow"><span class="lname" title="${attr(l.name)}">${escapeHtml(l.name)}</span><select class="lin lplatsel" data-elplat="${i}.${j}">${platOpts(l.platform)}</select><span class="lx" data-rml="${i}.${j}" title="remove link">×</span></div>`).join("") || '<div class="muted" style="font-size:12.5px">No links yet — pick the ones you run ads with below.</div>'}
       <div class="addrow addlink">
-        <input placeholder="Link / variant name" data-lname="${i}">
-        <select class="lplatsel" data-lplat="${i}">${platOpts("OnlyFinder")}</select>
-        <input placeholder="URL (optional)" data-lurl="${i}">
+        <select class="lin lpicksel" data-lpick="${i}">${pickerOpts(c.accountId, c.links)}</select>
+        <select class="lplatsel" data-lplat="${i}">${platOpts("Meta")}</select>
         <button class="ghostbtn" data-addl="${i}">+ Link</button>
       </div>
     </div>`).join("");
@@ -533,23 +554,22 @@ function renderCreators(){
   wrap.querySelectorAll("[data-pct]").forEach(el=>el.addEventListener("change",()=>{ CREATORS[+el.dataset.pct].pct=+el.value||0; commit(); }));
   wrap.querySelectorAll("[data-addl]").forEach(el=>el.addEventListener("click",()=>{
     const i=+el.dataset.addl;
-    const name=wrap.querySelector('[data-lname="'+i+'"]').value.trim();
-    if(!name) return;
+    const sel=wrap.querySelector('[data-lpick="'+i+'"]');
+    const code=sel.value; if(!code){ alert("Choose a tracking link from the list."); return; }
+    const opt=sel.options[sel.selectedIndex];
+    const name=opt.dataset.name || opt.textContent;
     const platform=wrap.querySelector('[data-lplat="'+i+'"]').value;
-    const url=wrap.querySelector('[data-lurl="'+i+'"]').value.trim();
-    (CREATORS[i].links=CREATORS[i].links||[]).push({name,platform,url});
-    commit();
+    (CREATORS[i].links=CREATORS[i].links||[]).push({code, name, platform, url:""});
+    commit(); loadLive();
   }));
+  CREATORS.forEach(c=>{ if(c.accountId) ensureOfLinks(c.accountId); });
   wrap.querySelectorAll("[data-rml]").forEach(el=>el.addEventListener("click",()=>{
-    const p=el.dataset.rml.split("."); CREATORS[+p[0]].links.splice(+p[1],1); commit();
+    const p=el.dataset.rml.split("."); CREATORS[+p[0]].links.splice(+p[1],1); commit(); loadLive();
   }));
-  // edit an existing link in place (name / platform / url)
-  const editLink=(ds,field)=>el=>el.addEventListener("change",()=>{
-    const p=el.dataset[ds].split("."); CREATORS[+p[0]].links[+p[1]][field]=el.value; commit(false);
-  });
-  wrap.querySelectorAll("[data-elname]").forEach(editLink("elname","name"));
-  wrap.querySelectorAll("[data-elplat]").forEach(editLink("elplat","platform"));
-  wrap.querySelectorAll("[data-elurl]").forEach(editLink("elurl","url"));
+  // change a link's platform in place
+  wrap.querySelectorAll("[data-elplat]").forEach(el=>el.addEventListener("change",()=>{
+    const p=el.dataset.elplat.split("."); CREATORS[+p[0]].links[+p[1]].platform=el.value; commit(false); loadLive();
+  }));
 }
 document.getElementById("ncAdd").addEventListener("click",()=>{
   const sel=document.getElementById("ncPick"); const id=sel.value;
@@ -607,9 +627,15 @@ async function loadLive(){
   try{
     const r=await fetch("/livedata"); if(!r.ok) return false;  // standalone file → keep sample
     const d=await r.json();
-    const rows = (d && d.rows) ? d.rows : [];
-    // We're served by the app → live mode. Use real rows, or EMPTY (never the sample).
-    DATA = rows.map(x=>({date:x.date,platform:x.platform||"",creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:x.variant||"",spend:+x.spend||0,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0}));
+    const allRows = (d && d.rows) ? d.rows : [];
+    // Only show the tracking links the boss picked per creator (not every OF link).
+    const codesByCreator={}, platByKey={};
+    CREATORS.forEach(c=>{ const k=(c.name||"").toLowerCase();
+      codesByCreator[k]=new Set((c.links||[]).map(l=>String(l.code)).filter(Boolean));
+      (c.links||[]).forEach(l=>{ if(l.code) platByKey[k+"|"+String(l.code)]=l.platform; });
+    });
+    const rows = allRows.filter(x=>{ const s=codesByCreator[(x.creator||"").toLowerCase()]; return s && s.has(String(x.code)); });
+    DATA = rows.map(x=>({date:x.date,platform:(platByKey[(x.creator||"").toLowerCase()+"|"+String(x.code)]||x.platform||""),creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:x.variant||"",spend:+x.spend||0,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0}));
     const sel=document.getElementById("source");
     if(sel && !sel.querySelector('option[value="live"]')){ const o=document.createElement("option"); o.value="live"; o.textContent="Live (OnlyFans)"; sel.insertBefore(o, sel.firstChild); }
     if(sel) sel.value="live";

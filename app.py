@@ -198,6 +198,7 @@ def sync_onlyfans():
             rows.append({
                 "date": today, "platform": "", "creator": creator,
                 "campaign": name, "test": "", "variant": name, "of_link": name,
+                "code": str(l.get("campaignCode") or ""),
                 "spend": 0, "clicks": int(l.get("clicksCount") or 0),
                 "new_fans": int(l.get("subscribersCount") or 0), "revenue": float(rev),
             })
@@ -416,6 +417,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"accounts": out})
             except Exception as e:
                 return self._send(200, {"accounts": [], "error": str(e)})
+        if path == "/of-links":
+            aid = (self._query().get("account") or [""])[0]
+            if not aid:
+                return self._send(200, {"links": []})
+            try:
+                links = [{"code": str(l.get("campaignCode") or ""),
+                          "name": l.get("campaignName") or ("c" + str(l.get("campaignCode") or "")),
+                          "clicks": int(l.get("clicksCount") or 0),
+                          "subs": int(l.get("subscribersCount") or 0)}
+                         for l in _of_links(aid)]
+                links.sort(key=lambda x: (-x["subs"], -x["clicks"]))  # most-active first
+                return self._send(200, {"links": links})
+            except Exception as e:
+                return self._send(200, {"links": [], "error": str(e)})
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
