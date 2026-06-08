@@ -263,6 +263,22 @@
 
 <div id="view-creators" hidden>
   <div class="card mb">
+    <h2>📷 Add keywords from a screenshot</h2>
+    <div class="src-note" style="margin-bottom:12px">Upload a screenshot from <b>OnlyFinder</b>, <b>OnlyGuider</b> or <b>OnlySeeker</b> showing your keywords — the working <i>and</i> the not-working ones. Claude reads the image and adds the keywords in, with their status and spend. (This is for the directory platforms — not Meta.)</div>
+    <div class="addrow">
+      <select id="ksCreator"><option value="">Choose creator…</option></select>
+      <select id="ksPlat">
+        <option value="OnlyFinder">OnlyFinder</option>
+        <option value="OnlyGuider">OnlyGuider</option>
+        <option value="OnlySeeker">OnlySeeker</option>
+      </select>
+      <input type="file" id="ksFile" accept="image/*" style="display:none">
+      <button class="primary" id="ksBtn">📷 Upload screenshot</button>
+      <span class="muted kwstatus" id="ksStatus" style="flex:1 1 100%"></span>
+    </div>
+    <div class="kwreview" id="ksReview"></div>
+  </div>
+  <div class="card mb">
     <h2>Creators</h2>
     <div class="src-note" style="margin-bottom:14px">Add creators, set a monthly salary or a revenue %, and manage their tracking links. Salary/% drives the net-profit math on the Overview. Saved in this browser.</div>
     <div id="creatorMgr"></div>
@@ -590,14 +606,8 @@ function renderCreators(){
         <select class="lplatsel" data-lplat="${i}">${platOpts("Meta")}</select>
         <button class="ghostbtn" data-addl="${i}">+ Link</button>
       </div>
-      <div class="addrow kwimport">
-        <select class="lplatsel" data-kwplat="${i}">${platOpts("OnlyFinder")}</select>
-        <input type="file" accept="image/*" data-kwfile="${i}" style="display:none">
-        <button class="ghostbtn" data-kwbtn="${i}">📷 Read keywords from a screenshot</button>
-        <span class="muted kwstatus" data-kwstatus="${i}"></span>
-      </div>
-      <div class="kwreview" data-kwreview="${i}"></div>
     </div>`).join("");
+  populateKsCreators();
   wrap.querySelectorAll("[data-rm]").forEach(el=>el.addEventListener("click",()=>{ CREATORS.splice(+el.dataset.rm,1); commit(); syncSelection(); loadCreatorOptions(); }));
   wrap.querySelectorAll("[data-sal]").forEach(el=>el.addEventListener("change",()=>{ CREATORS[+el.dataset.sal].salary=+el.value||0; commit(false); }));
   wrap.querySelectorAll("[data-pct]").forEach(el=>el.addEventListener("change",()=>{ CREATORS[+el.dataset.pct].pct=+el.value||0; commit(); }));
@@ -628,14 +638,29 @@ function renderCreators(){
     const p=el.dataset.elspend.split("."); const v=el.value.trim();
     CREATORS[+p[0]].links[+p[1]].spend = v==="" ? "" : (+v||0); commit(false); loadLive();
   }));
-  // 📷 screenshot keyword import: button opens the file picker
-  wrap.querySelectorAll("[data-kwbtn]").forEach(el=>el.addEventListener("click",()=>{
-    const f=wrap.querySelector('[data-kwfile="'+el.dataset.kwbtn+'"]'); if(f) f.click();
-  }));
-  wrap.querySelectorAll("[data-kwfile]").forEach(el=>el.addEventListener("change",()=>{
-    const i=+el.dataset.kwfile; const file=el.files&&el.files[0]; if(!file) return;
-    const plat=wrap.querySelector('[data-kwplat="'+i+'"]').value;
-    const stat=wrap.querySelector('[data-kwstatus="'+i+'"]');
+}
+
+// keep the screenshot card's creator dropdown in sync with the roster
+function populateKsCreators(){
+  const sel=document.getElementById("ksCreator"); if(!sel) return;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">Choose creator…</option>'+CREATORS.map((c,i)=>`<option value="${i}">${escapeHtml(c.name)}</option>`).join("");
+  if(cur!=="" && CREATORS[+cur]) sel.value=cur;
+}
+// wire the prominent "Add keywords from a screenshot" card (once)
+(function(){
+  const btn=document.getElementById("ksBtn"), file=document.getElementById("ksFile");
+  if(!btn||!file) return;
+  btn.addEventListener("click",()=>{
+    if(!CREATORS.length){ alert("Add a creator first (below), then upload a screenshot for them."); return; }
+    if(document.getElementById("ksCreator").value===""){ alert("Choose which creator this screenshot is for."); return; }
+    file.click();
+  });
+  file.addEventListener("change",()=>{
+    const ci=+document.getElementById("ksCreator").value;
+    const f=file.files&&file.files[0]; if(!f) return;
+    const plat=document.getElementById("ksPlat").value;
+    const stat=document.getElementById("ksStatus");
     stat.textContent="Reading the screenshot with Claude… ⏳";
     const rd=new FileReader();
     rd.onload=async()=>{
@@ -645,18 +670,18 @@ function renderCreators(){
         const d=await r.json();
         if(!r.ok||d.error){ stat.textContent="Couldn't read it: "+(d.error||r.status); return; }
         const kws=d.keywords||[];
-        stat.textContent = kws.length ? `Found ${kws.length} keyword${kws.length>1?'s':''} — review below.` : "No keywords found in that image.";
-        renderKwReview(i, plat, kws);
+        stat.textContent = kws.length ? `Found ${kws.length} keyword${kws.length>1?'s':''} for ${escapeHtml(CREATORS[ci].name)} — review below.` : "No keywords found in that image.";
+        renderKwReview(ci, plat, kws, document.getElementById("ksReview"));
       }catch(e){ stat.textContent="Couldn't read it: "+e.message; }
-      el.value="";
+      file.value="";
     };
-    rd.readAsDataURL(file);
-  }));
-}
+    rd.readAsDataURL(f);
+  });
+})();
 
 // show the keywords Claude pulled from the screenshot so the boss can confirm before adding
-function renderKwReview(i, platform, kws){
-  const box=document.querySelector('[data-kwreview="'+i+'"]'); if(!box) return;
+function renderKwReview(i, platform, kws, box){
+  box = box || document.querySelector('[data-kwreview="'+i+'"]'); if(!box) return;
   if(!kws.length){ box.innerHTML=""; return; }
   const links=(CREATORS[i].links||[]);
   const norm=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
