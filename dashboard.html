@@ -123,9 +123,11 @@
   .cmgr-pay label{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
   .cmgr-pay input{width:120px}
   .cmgr-sub{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:0 0 8px;font-weight:700}
-  .lrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .lrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
   .lrow .lin{background-color:var(--panel)}
-  .lname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:12.5px}
+  .lrow .lkw{flex:0 1 150px;min-width:110px}
+  .lrow .lspend{flex:0 0 92px;min-width:0}
+  .lname{flex:1 1 130px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:12.5px}
   .lpicksel{flex:1;min-width:0}
   .lrow .lplatsel{flex:0 0 130px}
   .lrow input.lin{flex:1;min-width:90px}
@@ -216,7 +218,7 @@
     <div class="tscroll">
     <table id="variantTable">
       <thead><tr>
-        <th>Variant</th><th>Creator</th><th>Platform</th><th>Spend</th><th>Clicks</th>
+        <th>Keyword / Ad</th><th>Creator</th><th>Platform</th><th>Spend</th><th>Clicks</th>
         <th>New Fans</th><th>CVR</th><th>CPC</th><th>Revenue</th><th>CAC</th><th>LTV</th><th>ROAS</th><th>Profit</th><th>Call</th>
       </tr></thead>
       <tbody></tbody>
@@ -569,8 +571,8 @@ function renderCreators(){
         <label>or %</label><input type="number" min="0" max="100" value="${+c.pct||0}" data-pct="${i}">
         <span class="src-note">current pay: ${payLabel(c)}</span>
       </div>
-      <div class="cmgr-sub">Tracking links <span style="text-transform:none;letter-spacing:0;font-weight:400">— pick the OnlyFans links you run ads with, and set each one’s platform</span></div>
-      ${(c.links||[]).map((l,j)=>`<div class="lrow"><span class="lname" title="${attr(l.name)}">${escapeHtml(l.name)}</span><select class="lin lplatsel" data-elplat="${i}.${j}">${platOpts(l.platform)}</select><span class="lx" data-rml="${i}.${j}" title="remove link">×</span></div>`).join("") || '<div class="muted" style="font-size:12.5px">No links yet — pick the ones you run ads with below.</div>'}
+      <div class="cmgr-sub">Tracking links <span style="text-transform:none;letter-spacing:0;font-weight:400">— pick the OnlyFans links you run ads with, set each one’s platform, name the <b>keyword</b>, and type the <b>$ spent</b> (OnlyFinder / OnlyGuider / OnlySeeker — Meta fills in automatically)</span></div>
+      ${(c.links||[]).map((l,j)=>`<div class="lrow"><span class="lname" title="${attr(l.name)}">${escapeHtml(l.name)}</span><input class="lin lkw" data-elkw="${i}.${j}" value="${attr(l.keyword||'')}" placeholder="keyword" title="keyword / label for this link"><select class="lin lplatsel" data-elplat="${i}.${j}">${platOpts(l.platform)}</select><input class="lin lspend" type="number" min="0" step="1" data-elspend="${i}.${j}" value="${(l.spend!=null&&l.spend!=='')?(+l.spend):''}" placeholder="$ spent" title="total ad spend on this keyword (OnlyFinder / OnlyGuider / OnlySeeker). Meta fills in automatically."><span class="lx" data-rml="${i}.${j}" title="remove link">×</span></div>`).join("") || '<div class="muted" style="font-size:12.5px">No links yet — pick the ones you run ads with below.</div>'}
       <div class="addrow addlink">
         <select class="lin lpicksel" data-lpick="${i}">${pickerOpts(c.accountId, c.links)}</select>
         <select class="lplatsel" data-lplat="${i}">${platOpts("Meta")}</select>
@@ -597,6 +599,15 @@ function renderCreators(){
   // change a link's platform in place
   wrap.querySelectorAll("[data-elplat]").forEach(el=>el.addEventListener("change",()=>{
     const p=el.dataset.elplat.split("."); CREATORS[+p[0]].links[+p[1]].platform=el.value; commit(false); loadLive();
+  }));
+  // edit a link's keyword label
+  wrap.querySelectorAll("[data-elkw]").forEach(el=>el.addEventListener("change",()=>{
+    const p=el.dataset.elkw.split("."); CREATORS[+p[0]].links[+p[1]].keyword=el.value.trim(); commit(false); loadLive();
+  }));
+  // enter manual spend for this keyword (OnlyFinder/Guider/Seeker — no API)
+  wrap.querySelectorAll("[data-elspend]").forEach(el=>el.addEventListener("change",()=>{
+    const p=el.dataset.elspend.split("."); const v=el.value.trim();
+    CREATORS[+p[0]].links[+p[1]].spend = v==="" ? "" : (+v||0); commit(false); loadLive();
   }));
 }
 document.getElementById("ncAdd").addEventListener("click",()=>{
@@ -664,13 +675,23 @@ async function loadLive(){
     else { setSyncPill("idle","Not synced yet"); }
     const allRows = (d && d.rows) ? d.rows : [];
     // Only show the tracking links the boss picked per creator (not every OF link).
-    const codesByCreator={}, platByKey={};
+    const codesByCreator={}, platByKey={}, kwByKey={}, spendByKey={};
     CREATORS.forEach(c=>{ const k=(c.name||"").toLowerCase();
       codesByCreator[k]=new Set((c.links||[]).map(l=>String(l.code)).filter(Boolean));
-      (c.links||[]).forEach(l=>{ if(l.code) platByKey[k+"|"+String(l.code)]=l.platform; });
+      (c.links||[]).forEach(l=>{ if(!l.code) return; const kk=k+"|"+String(l.code);
+        platByKey[kk]=l.platform;
+        if(l.keyword) kwByKey[kk]=l.keyword;
+        if(l.spend!=null && l.spend!=='') spendByKey[kk]=+l.spend||0;
+      });
     });
     const rows = allRows.filter(x=>{ const s=codesByCreator[(x.creator||"").toLowerCase()]; return s && s.has(String(x.code)); });
-    DATA = rows.map(x=>({date:x.date,platform:(platByKey[(x.creator||"").toLowerCase()+"|"+String(x.code)]||x.platform||""),creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:x.variant||"",spend:+x.spend||0,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0}));
+    DATA = rows.map(x=>{ const kk=(x.creator||"").toLowerCase()+"|"+String(x.code);
+      // manual keyword spend wins when set; otherwise use server (Meta) spend
+      const spend = (kk in spendByKey) ? spendByKey[kk] : (+x.spend||0);
+      // label this row by its keyword if one was set, else the OF link/campaign name
+      const label = kwByKey[kk] || x.variant || x.campaign || "";
+      return {date:x.date,platform:(platByKey[kk]||x.platform||""),creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:label,keyword:kwByKey[kk]||"",spend:spend,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0};
+    });
     const sel=document.getElementById("source");
     if(sel && !sel.querySelector('option[value="live"]')){ const o=document.createElement("option"); o.value="live"; o.textContent="Live (OnlyFans)"; sel.insertBefore(o, sel.firstChild); }
     if(sel) sel.value="live";
