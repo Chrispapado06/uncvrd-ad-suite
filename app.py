@@ -170,6 +170,20 @@ def _of_links(aid):
     return []
 
 
+def _is_ad_link(name):
+    """Hide OnlyFans' auto-generated per-visitor 'Traffic/<id>/#n/<ts>' links from the
+    pickers and data — those aren't campaigns you run ads with, they just clutter the list."""
+    n = (name or "").strip()
+    if not n:
+        return True  # unnamed link (shown as c<code>) — keep it
+    low = n.lower()
+    if low.startswith("traffic/"):
+        return False
+    if "/#" in n:  # the Traffic/<id>/#<n>/<timestamp> shape
+        return False
+    return True
+
+
 def _norm(s):
     """Loose key for matching a Meta campaign name to an OF tracking link."""
     return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
@@ -235,6 +249,8 @@ def sync_onlyfans():
         except Exception:
             continue
         for l in links:
+            if not _is_ad_link(l.get("campaignName")):
+                continue  # skip OnlyFans' auto-generated Traffic/... junk links
             name = l.get("campaignName") or ("c" + str(l.get("campaignCode") or ""))
             rev = (l.get("revenue") or {}).get("total") or 0
             rows.append({
@@ -526,7 +542,7 @@ class Handler(BaseHTTPRequestHandler):
                           "name": l.get("campaignName") or ("c" + str(l.get("campaignCode") or "")),
                           "clicks": int(l.get("clicksCount") or 0),
                           "subs": int(l.get("subscribersCount") or 0)}
-                         for l in _of_links(aid)]
+                         for l in _of_links(aid) if _is_ad_link(l.get("campaignName"))]
                 links.sort(key=lambda x: (-x["subs"], -x["clicks"]))  # most-active first
                 return self._send(200, {"links": links})
             except Exception as e:
