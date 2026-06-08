@@ -136,6 +136,18 @@
   .addrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   .addrow input,.addrow select{flex:1;min-width:120px}
   .addlink{margin-top:10px}
+  .kwimport{margin-top:8px}
+  .kwimport .ghostbtn{flex:0 0 auto}
+  .kwstatus{font-size:12px;flex:1 1 100%}
+  .kwreview{margin-top:10px}
+  .kwreview table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .kwreview th,.kwreview td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left}
+  .kwreview input,.kwreview select{width:100%;background-color:var(--panel)}
+  .kwreview .kwactions{display:flex;gap:8px;margin-top:8px}
+  .stat{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;white-space:nowrap}
+  .stat.working{background:rgba(34,197,94,.18);color:#22c55e}
+  .stat.not_working{background:rgba(255,77,79,.2);color:var(--red)}
+  .stat.unknown{background:var(--line);color:var(--muted)}
   .ghostbtn{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:9px 13px;font-weight:600;cursor:pointer}
   /* modern button hover: naturally dark → grows & flips white with black text */
   button.primary,.ghostbtn,.icon-btn,.chip{
@@ -356,7 +368,7 @@ function variantRows(){
   const out = [];
   for(const [v,rows] of groupBy(DATA,"variant")){
     const a = agg(rows);
-    out.push({variant:v, creator:rows[0].creator, platform:rows[0].platform, ...a});
+    out.push({variant:v, creator:rows[0].creator, platform:rows[0].platform, status:rows[0].status||"", linked:rows.some(r=>r.linked), ...a});
   }
   return out.sort((x,y)=>y.profit-x.profit);
 }
@@ -394,14 +406,14 @@ function action(color,title,sub){
 function renderVariants(){
   const tb = document.querySelector("#variantTable tbody");
   tb.innerHTML = variantRows().map(v=>`<tr>
-    <td>${v.variant}</td><td>${v.creator}</td><td>${v.platform}</td>
+    <td>${v.variant}${v.status?` <span class="stat ${v.status}">${v.status==='not_working'?'not working':v.status}</span>`:''}</td><td>${v.creator}</td><td>${v.platform}</td>
     <td>${money(v.spend)}</td><td>${v.clicks}</td><td>${v.fans}</td>
     <td class="${cvrBad(v)?'flag':''}">${pct(v.cvr)}</td>
     <td class="${cpcBad(v)?'flag':''}">${v.spend>0?money2(v.cpc):'—'}</td>
     <td>${money(v.revenue)}</td>
     <td>${money2(v.cac)}</td><td>${money2(v.ltv)}</td><td>${mult(v.roas)}</td>
-    <td class="${v.profit>=0?'pos':'neg'}">${money(v.profit)}</td>
-    <td>${v.verdict?`<span class="badge b-${v.verdict}">${v.verdict}</span>`:''}</td></tr>`).join("");
+    <td class="${v.linked?(v.profit>=0?'pos':'neg'):''}">${v.linked?money(v.profit):'—'}</td>
+    <td>${v.linked ? (v.verdict?`<span class="badge b-${v.verdict}">${v.verdict}</span>`:'') : '<span class="muted" title="attach an OnlyFans tracking link to this keyword to see revenue &amp; ROI">link OF</span>'}</td></tr>`).join("");
 }
 
 function renderPlatforms(){
@@ -578,6 +590,13 @@ function renderCreators(){
         <select class="lplatsel" data-lplat="${i}">${platOpts("Meta")}</select>
         <button class="ghostbtn" data-addl="${i}">+ Link</button>
       </div>
+      <div class="addrow kwimport">
+        <select class="lplatsel" data-kwplat="${i}">${platOpts("OnlyFinder")}</select>
+        <input type="file" accept="image/*" data-kwfile="${i}" style="display:none">
+        <button class="ghostbtn" data-kwbtn="${i}">📷 Read keywords from a screenshot</button>
+        <span class="muted kwstatus" data-kwstatus="${i}"></span>
+      </div>
+      <div class="kwreview" data-kwreview="${i}"></div>
     </div>`).join("");
   wrap.querySelectorAll("[data-rm]").forEach(el=>el.addEventListener("click",()=>{ CREATORS.splice(+el.dataset.rm,1); commit(); syncSelection(); loadCreatorOptions(); }));
   wrap.querySelectorAll("[data-sal]").forEach(el=>el.addEventListener("change",()=>{ CREATORS[+el.dataset.sal].salary=+el.value||0; commit(false); }));
@@ -609,6 +628,75 @@ function renderCreators(){
     const p=el.dataset.elspend.split("."); const v=el.value.trim();
     CREATORS[+p[0]].links[+p[1]].spend = v==="" ? "" : (+v||0); commit(false); loadLive();
   }));
+  // 📷 screenshot keyword import: button opens the file picker
+  wrap.querySelectorAll("[data-kwbtn]").forEach(el=>el.addEventListener("click",()=>{
+    const f=wrap.querySelector('[data-kwfile="'+el.dataset.kwbtn+'"]'); if(f) f.click();
+  }));
+  wrap.querySelectorAll("[data-kwfile]").forEach(el=>el.addEventListener("change",()=>{
+    const i=+el.dataset.kwfile; const file=el.files&&el.files[0]; if(!file) return;
+    const plat=wrap.querySelector('[data-kwplat="'+i+'"]').value;
+    const stat=wrap.querySelector('[data-kwstatus="'+i+'"]');
+    stat.textContent="Reading the screenshot with Claude… ⏳";
+    const rd=new FileReader();
+    rd.onload=async()=>{
+      try{
+        const r=await fetch("/keyword-shot",{method:"POST",headers:{"content-type":"application/json"},
+          body:JSON.stringify({image:rd.result, platform:plat})});
+        const d=await r.json();
+        if(!r.ok||d.error){ stat.textContent="Couldn't read it: "+(d.error||r.status); return; }
+        const kws=d.keywords||[];
+        stat.textContent = kws.length ? `Found ${kws.length} keyword${kws.length>1?'s':''} — review below.` : "No keywords found in that image.";
+        renderKwReview(i, plat, kws);
+      }catch(e){ stat.textContent="Couldn't read it: "+e.message; }
+      el.value="";
+    };
+    rd.readAsDataURL(file);
+  }));
+}
+
+// show the keywords Claude pulled from the screenshot so the boss can confirm before adding
+function renderKwReview(i, platform, kws){
+  const box=document.querySelector('[data-kwreview="'+i+'"]'); if(!box) return;
+  if(!kws.length){ box.innerHTML=""; return; }
+  const links=(CREATORS[i].links||[]);
+  const norm=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const linkOpts=(kw)=>{
+    const nk=norm(kw);
+    let html='<option value="new">— add as new keyword —</option>';
+    links.forEach((l,j)=>{ const match = nk && (norm(l.keyword)===nk || norm(l.name)===nk);
+      html+=`<option value="${j}" ${match?'selected':''}>${escapeHtml(l.name||l.keyword||('link '+j))}</option>`; });
+    return html;
+  };
+  box.innerHTML = `<table><thead><tr><th>Keyword</th><th>Status</th><th>$ spent</th><th>Attach to OnlyFans link</th></tr></thead><tbody>
+    ${kws.map((k,r)=>`<tr data-kwr="${r}" data-clicks="${k.clicks!=null?(+k.clicks):''}">
+      <td><input class="kw-k" value="${attr(k.keyword||'')}"></td>
+      <td><select class="kw-s">${["working","not_working","unknown"].map(s=>`<option value="${s}" ${(k.status||'unknown')===s?'selected':''}>${s==='not_working'?'not working':s}</option>`).join("")}</select></td>
+      <td><input class="kw-sp" type="number" min="0" value="${(k.spend!=null)?(+k.spend):''}" placeholder="$"></td>
+      <td><select class="kw-l">${linkOpts(k.keyword)}</select></td>
+    </tr>`).join("")}
+    </tbody></table>
+    <div class="kwactions"><button class="ghostbtn" data-kwadd="${i}" data-plat="${attr(platform)}">Add these keywords</button>
+    <button class="ghostbtn" data-kwcancel="${i}">Cancel</button></div>`;
+  box.querySelector('[data-kwcancel]').addEventListener("click",()=>{ box.innerHTML=""; });
+  box.querySelector('[data-kwadd]').addEventListener("click",()=>{
+    const plat=box.querySelector('[data-kwadd]').dataset.plat;
+    box.querySelectorAll('tr[data-kwr]').forEach(tr=>{
+      const kw=tr.querySelector('.kw-k').value.trim(); if(!kw) return;
+      const status=tr.querySelector('.kw-s').value;
+      const spRaw=tr.querySelector('.kw-sp').value.trim();
+      const spend = spRaw==="" ? "" : (+spRaw||0);
+      const sel=tr.querySelector('.kw-l').value;
+      const clicks = tr.dataset.clicks==="" ? "" : (+tr.dataset.clicks||0);
+      if(sel==="new"){
+        (CREATORS[i].links=CREATORS[i].links||[]).push({code:"", name:kw, platform:plat, keyword:kw, spend, status, clicks});
+      } else {
+        const l=CREATORS[i].links[+sel]; if(l){ l.keyword=kw; if(spend!=="") l.spend=spend; l.status=status; if(plat) l.platform=l.platform||plat; }
+      }
+    });
+    box.innerHTML="";
+    const stat=document.querySelector('[data-kwstatus="'+i+'"]'); if(stat) stat.textContent="Added ✅";
+    commit(); loadLive();
+  });
 }
 document.getElementById("ncAdd").addEventListener("click",()=>{
   const sel=document.getElementById("ncPick"); const id=sel.value;
@@ -675,12 +763,13 @@ async function loadLive(){
     else { setSyncPill("idle","Not synced yet"); }
     const allRows = (d && d.rows) ? d.rows : [];
     // Only show the tracking links the boss picked per creator (not every OF link).
-    const codesByCreator={}, platByKey={}, kwByKey={}, spendByKey={};
+    const codesByCreator={}, platByKey={}, kwByKey={}, spendByKey={}, statByKey={};
     CREATORS.forEach(c=>{ const k=(c.name||"").toLowerCase();
       codesByCreator[k]=new Set((c.links||[]).map(l=>String(l.code)).filter(Boolean));
       (c.links||[]).forEach(l=>{ if(!l.code) return; const kk=k+"|"+String(l.code);
         platByKey[kk]=l.platform;
         if(l.keyword) kwByKey[kk]=l.keyword;
+        if(l.status) statByKey[kk]=l.status;
         if(l.spend!=null && l.spend!=='') spendByKey[kk]=+l.spend||0;
       });
     });
@@ -690,12 +779,18 @@ async function loadLive(){
       const spend = (kk in spendByKey) ? spendByKey[kk] : (+x.spend||0);
       // label this row by its keyword if one was set, else the OF link/campaign name
       const label = kwByKey[kk] || x.variant || x.campaign || "";
-      return {date:x.date,platform:(platByKey[kk]||x.platform||""),creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:label,keyword:kwByKey[kk]||"",spend:spend,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0};
+      return {date:x.date,platform:(platByKey[kk]||x.platform||""),creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:label,keyword:kwByKey[kk]||"",status:statByKey[kk]||"",linked:true,spend:spend,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0};
     });
+    // screenshot-imported keywords with no OnlyFans link yet — show their spend/status (fans/revenue come once a link is attached)
+    CREATORS.forEach(c=>{ (c.links||[]).forEach(l=>{
+      if(l.code) return;
+      if(!l.keyword && (l.spend==null||l.spend==='')) return;
+      DATA.push({date:"",platform:l.platform||"",creator:c.name||"",campaign:l.name||l.keyword||"",test:"",variant:l.keyword||l.name||"",keyword:l.keyword||"",status:l.status||"",linked:false,spend:+l.spend||0,clicks:+l.clicks||0,new_fans:0,revenue:0});
+    }); });
     const sel=document.getElementById("source");
     if(sel && !sel.querySelector('option[value="live"]')){ const o=document.createElement("option"); o.value="live"; o.textContent="Live (OnlyFans)"; sel.insertBefore(o, sel.firstChild); }
     if(sel) sel.value="live";
-    const note=document.getElementById("liveNote"); if(note) note.style.display = rows.length ? "none" : "block";
+    const note=document.getElementById("liveNote"); if(note) note.style.display = DATA.length ? "none" : "block";
     render(); return true;
   }catch(e){ setSyncPill("idle","Sample data"); }
   return false;

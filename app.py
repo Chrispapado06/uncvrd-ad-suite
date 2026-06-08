@@ -321,6 +321,59 @@ def scope_prefix(scope):
     return f"Focus your analysis only on the creator named '{scope}'. "
 
 
+KEYWORD_SHOT_TOOL = {
+    "name": "report_keywords",
+    "description": "Report every keyword / search-term row visible in an OnlyFinder, "
+                   "OnlyGuider or OnlySeeker advertising screenshot.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "keywords": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "keyword": {"type": "string", "description": "the keyword / search term text exactly as shown"},
+                        "status": {"type": "string", "enum": ["working", "not_working", "unknown"],
+                                   "description": "working = active/enabled/approved/getting clicks; not_working = paused/disabled/rejected/zero results; unknown if unclear"},
+                        "clicks": {"type": ["integer", "null"], "description": "clicks if a number is shown, else null"},
+                        "spend": {"type": ["number", "null"], "description": "USD spent if shown, else null"},
+                    },
+                    "required": ["keyword", "status"],
+                },
+            }
+        },
+        "required": ["keywords"],
+    },
+}
+
+
+def extract_keywords_from_image(b64, media_type, platform):
+    """Use Claude vision to read keyword rows out of a directory-ad screenshot.
+    Returns a list of {keyword, status, clicks, spend}. Raises on API error."""
+    client = Anthropic(api_key=api_key())
+    msg = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=2000,
+        tools=[KEYWORD_SHOT_TOOL],
+        tool_choice={"type": "tool", "name": "report_keywords"},
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+            {"type": "text", "text": (
+                "This is a screenshot from the %s advertising / keyword dashboard for an "
+                "OnlyFans creator. Read EVERY keyword (search-term) row you can see. For each, "
+                "capture the keyword text, whether it looks like it is working (active / enabled / "
+                "approved / getting clicks) or not working (paused / disabled / rejected / zero "
+                "results), and any clicks and spend ($) numbers shown. If a number isn't visible, "
+                "use null. Call the report_keywords tool with the full list." % platform)},
+        ]}],
+    )
+    for b in msg.content:
+        if getattr(b, "type", None) == "tool_use" and b.name == "report_keywords":
+            return (b.input or {}).get("keywords", []) or []
+    return []
+
+
 def run_analysis(key, question, data_path):
     client = Anthropic(api_key=key)
     ids = agent_ids()
@@ -514,6 +567,24 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             return self._send(200, {"ok": True})
+
+        if path == "/keyword-shot":
+            if not api_key():
+                return self._send(400, {"error": "No Anthropic API key configured on the server."})
+            img = payload.get("image") or ""
+            platform = (payload.get("platform") or "OnlyFinder").strip()
+            try:
+                if img.startswith("data:"):
+                    head, b64 = img.split(",", 1)
+                    media_type = head.split(";")[0].split(":", 1)[1] or "image/png"
+                else:
+                    b64, media_type = img, "image/png"
+                if not b64:
+                    return self._send(400, {"error": "No image received."})
+                kws = extract_keywords_from_image(b64, media_type, platform)
+                return self._send(200, {"keywords": kws})
+            except Exception as e:
+                return self._send(500, {"error": str(e)})
 
         if path == "/sync":
             return self._send(200, sync_onlyfans())
