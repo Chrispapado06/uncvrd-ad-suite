@@ -779,6 +779,23 @@ function setSyncPill(state, text){
   const p=document.getElementById("syncPill"); if(!p) return;
   p.className="sync-pill "+state; p.textContent=text;
 }
+// Attach Meta spend (campaigns named by creator) to each creator's Meta rows in DATA.
+function applyMetaSpend(metaSpend){
+  if(!metaSpend || !Object.keys(metaSpend).length) return;
+  const nrm=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+  const byCreator={};
+  for(const camp in metaSpend){ const ck=nrm(camp); const amt=+metaSpend[camp]||0; if(!ck||amt<=0) continue;
+    // find which creator this campaign belongs to (name match either direction)
+    const c=CREATORS.find(c=>{ const cn=nrm(c.name); return cn && (cn===ck || ck.includes(cn) || cn.includes(ck)); });
+    if(c) byCreator[c.name]=(byCreator[c.name]||0)+amt;
+  }
+  Object.keys(byCreator).forEach(cname=>{
+    const metaRows=DATA.filter(r=>r.creator===cname && r.platform==="Meta" && !r.manualSpend);
+    if(!metaRows.length) return;                 // creator has no Meta link to attach it to
+    const share=byCreator[cname]/metaRows.length; // split evenly across their Meta links
+    metaRows.forEach(r=>{ r.spend=share; });
+  });
+}
 async function loadLive(){
   try{
     const r=await fetch("/livedata"); if(!r.ok){ setSyncPill("idle","Sample data"); return false; }  // standalone file → keep sample
@@ -800,18 +817,22 @@ async function loadLive(){
     });
     const rows = allRows.filter(x=>{ const s=codesByCreator[(x.creator||"").toLowerCase()]; return s && s.has(String(x.code)); });
     DATA = rows.map(x=>{ const kk=(x.creator||"").toLowerCase()+"|"+String(x.code);
-      // manual keyword spend wins when set; otherwise use server (Meta) spend
-      const spend = (kk in spendByKey) ? spendByKey[kk] : (+x.spend||0);
+      const manual = (kk in spendByKey);
+      // manual keyword spend wins when set; otherwise 0 (Meta spend is applied below)
+      const spend = manual ? spendByKey[kk] : (+x.spend||0);
       // label this row by its keyword if one was set, else the OF link/campaign name
       const label = kwByKey[kk] || x.variant || x.campaign || "";
-      return {date:x.date,platform:(platByKey[kk]||x.platform||""),creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:label,keyword:kwByKey[kk]||"",status:statByKey[kk]||"",linked:true,spend:spend,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0};
+      return {date:x.date,platform:(platByKey[kk]||x.platform||""),creator:x.creator||"",campaign:x.campaign||"",test:x.test||"",variant:label,keyword:kwByKey[kk]||"",status:statByKey[kk]||"",linked:true,manualSpend:manual,spend:spend,clicks:+x.clicks||0,new_fans:+x.new_fans||0,revenue:+x.revenue||0};
     });
     // screenshot-imported keywords with no OnlyFans link yet — show their spend/status (fans/revenue come once a link is attached)
     CREATORS.forEach(c=>{ (c.links||[]).forEach(l=>{
       if(l.code) return;
       if(!l.keyword && (l.spend==null||l.spend==='')) return;
-      DATA.push({date:"",platform:l.platform||"",creator:c.name||"",campaign:l.name||l.keyword||"",test:"",variant:l.keyword||l.name||"",keyword:l.keyword||"",status:l.status||"",linked:false,spend:+l.spend||0,clicks:+l.clicks||0,new_fans:0,revenue:0});
+      DATA.push({date:"",platform:l.platform||"",creator:c.name||"",campaign:l.name||l.keyword||"",test:"",variant:l.keyword||l.name||"",keyword:l.keyword||"",status:l.status||"",linked:false,manualSpend:(l.spend!=null&&l.spend!==''),spend:+l.spend||0,clicks:+l.clicks||0,new_fans:0,revenue:0});
     }); });
+    // Meta spend is named by creator (e.g. campaign "sandra") → attach each creator's
+    // Meta spend to that creator's Meta links (split evenly if more than one). Manual entries are left alone.
+    applyMetaSpend((d && d.meta_spend) || {});
     const sel=document.getElementById("source");
     if(sel && !sel.querySelector('option[value="live"]')){ const o=document.createElement("option"); o.value="live"; o.textContent="Live (OnlyFans)"; sel.insertBefore(o, sel.firstChild); }
     if(sel) sel.value="live";

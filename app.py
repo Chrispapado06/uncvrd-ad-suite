@@ -237,15 +237,18 @@ def sync_onlyfans():
         for l in links:
             name = l.get("campaignName") or ("c" + str(l.get("campaignCode") or ""))
             rev = (l.get("revenue") or {}).get("total") or 0
-            spend = spend_map.get(_norm(name), 0)  # join Meta spend by campaign name
             rows.append({
                 "date": today, "platform": "", "creator": creator,
                 "campaign": name, "test": "", "variant": name, "of_link": name,
                 "code": str(l.get("campaignCode") or ""),
-                "spend": float(spend), "clicks": int(l.get("clicksCount") or 0),
+                # spend stays 0 here — the dashboard attaches Meta spend per creator
+                # using meta_spend (campaigns are named by creator), so it lands on
+                # the right Meta links without double-counting.
+                "spend": 0, "clicks": int(l.get("clicksCount") or 0),
                 "new_fans": int(l.get("subscribersCount") or 0), "revenue": float(rev),
             })
     LIVE["rows"] = rows
+    LIVE["meta_spend"] = spend_map  # {campaign_name: spend_today}; {} until Meta token set
     LIVE["at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     LIVE["error"] = None
     try:
@@ -503,7 +506,8 @@ class Handler(BaseHTTPRequestHandler):
             jid = (self._query().get("id") or [""])[0]
             return self._send(200, JOBS.get(jid, {"status": "unknown"}))
         if path == "/livedata":
-            return self._send(200, {"rows": LIVE.get("rows", []), "at": LIVE.get("at"), "error": LIVE.get("error")})
+            return self._send(200, {"rows": LIVE.get("rows", []), "at": LIVE.get("at"),
+                                    "error": LIVE.get("error"), "meta_spend": LIVE.get("meta_spend") or {}})
         if path == "/of-accounts":
             try:
                 sel = set(CONFIG.get("selected_accounts") or [])
