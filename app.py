@@ -511,6 +511,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+        # Today's total Meta spend — for the Google Sheet (Meta blocks Google's IPs,
+        # so the sheet asks us instead). Key-protected, no login cookie needed.
+        if path == "/meta-today":
+            key = (self._query().get("key") or [""])[0]
+            if not APP_PASSWORD or key != APP_PASSWORD:
+                return self._send(403, {"error": "forbidden"})
+            try:
+                total = round(sum(float(v) for v in (meta_spend_map() or {}).values()), 2)
+                return self._send(200, {"spend": total})
+            except Exception as e:
+                return self._send(200, {"spend": 0, "error": str(e)})
         if not self._authed():
             return self._send(200, LOGIN_HTML, "text/html; charset=utf-8")
         if path == "/":
