@@ -236,6 +236,111 @@ def meta_spend_map():
     return out
 
 
+def _classify_platform(name):
+    """Which ad platform a tracking link belongs to, from its name."""
+    n = (name or "").lower()
+    if "meta" in n:
+        return "Meta"
+    if "guider" in n:
+        return "OnlyGuider"
+    if "seeker" in n:
+        return "OnlySeeker"
+    if "finder" in n or "search" in n:
+        return "OnlyFinder"
+    return None
+
+
+def meta_spend_daily(since, until):
+    """{(date, normalized_campaign): spend} per day from Meta. {} if no token/blocked."""
+    token = CONFIG.get("meta_token") or ""
+    acct = CONFIG.get("meta_ad_acct") or ""
+    if not token or not acct:
+        return {}
+    if not acct.startswith("act_"):
+        acct = "act_" + acct
+    params = urllib.parse.urlencode({
+        "level": "campaign", "fields": "campaign_name,spend", "time_increment": "1",
+        "time_range": json.dumps({"since": since, "until": until}),
+        "limit": "1000", "access_token": token})
+    try:
+        req = urllib.request.Request("https://graph.facebook.com/v19.0/%s/insights?%s" % (acct, params),
+                                     headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=45) as r:
+            d = json.load(r)
+        out = {}
+        for row in (d.get("data") or []):
+            k = (row.get("date_start"), _norm(row.get("campaign_name")))
+            out[k] = out.get(k, 0.0) + float(row.get("spend") or 0)
+        return out
+    except Exception:
+        return {}
+
+
+FEED_CACHE = {"at": 0, "body": None}
+FEED_COLS = ["Date", "Creator", "Ad Spend Meta", "Ad Spend OnlyFinder", "Ad Spend OnlyGuider",
+             "Ad Spend OnlySeeker", "Clicks Meta", "Clicks OnlyFinder", "Clicks OnlyGuider",
+             "Clicks OnlySeeker", "Fans Meta", "Fans OnlyFinder", "Fans OnlyGuider",
+             "Fans OnlySeeker", "Revenue", "Total Spend", "Total Fans", "ROAS", "Profit"]
+PLATS = ["Meta", "OnlyFinder", "OnlyGuider", "OnlySeeker"]
+
+
+def sheet_feed_csv(days=60):
+    """Daily per-creator ad numbers as CSV, straight from OnlyFans' per-day stats
+    (and Meta when the token works). Stateless: regenerated on request, cached 15 min."""
+    if FEED_CACHE["body"] and time.time() - FEED_CACHE["at"] < 900:
+        return FEED_CACHE["body"]
+    start = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    agg = {}   # (date, creator) -> {"clicks":{p:n}, "fans":{p:n}, "rev":x}
+    for a in _of_accounts():
+        if not a.get("is_authenticated"):
+            continue
+        creator = a.get("display_name") or a.get("onlyfans_username") or ""
+        try:
+            links = _of_links(a["id"])
+        except Exception:
+            continue
+        for l in links:
+            plat = _classify_platform(l.get("campaignName"))
+            if not plat or not l.get("id"):
+                continue
+            try:
+                st = _of_fetch("/%s/tracking-links/%s/stats" % (a["id"], l["id"]))
+            except Exception:
+                continue
+            for day in (((st or {}).get("data") or {}).get("daily_metrics") or []):
+                ts = day.get("timestamp") or ""
+                if ts < start:
+                    continue
+                k = (ts, creator)
+                rec = agg.setdefault(k, {"clicks": {p: 0 for p in PLATS},
+                                         "fans": {p: 0 for p in PLATS}, "rev": 0.0})
+                rec["clicks"][plat] += int(day.get("clicks") or 0)
+                rec["fans"][plat] += int(day.get("subs") or 0)
+                rec["rev"] += float(day.get("revenue") or 0)
+    spend = meta_spend_daily(start, datetime.date.today().isoformat())
+    lines = [",".join(FEED_COLS)]
+    for (ts, creator) in sorted(agg.keys()):
+        rec = agg[(ts, creator)]
+        ms = 0.0
+        nc = _norm(creator)
+        for (sd, camp), amt in spend.items():
+            if sd == ts and camp and (camp in nc or nc in camp):
+                ms += amt
+        total_spend = ms
+        total_fans = sum(rec["fans"].values())
+        roas = (rec["rev"] / total_spend) if total_spend else ""
+        row = [ts, creator.replace(",", " "), "%.2f" % ms, "0", "0", "0"]
+        row += [str(rec["clicks"][p]) for p in PLATS]
+        row += [str(rec["fans"][p]) for p in PLATS]
+        row += ["%.2f" % rec["rev"], "%.2f" % total_spend, str(total_fans),
+                ("%.2f" % roas) if roas != "" else "", "%.2f" % (rec["rev"] - total_spend)]
+        lines.append(",".join(row))
+    body = "\n".join(lines) + "\n"
+    FEED_CACHE["at"] = time.time()
+    FEED_CACHE["body"] = body
+    return body
+
+
 def sync_onlyfans():
     """Pull every authenticated account's tracking links into live rows the
     dashboard + analyst read. Backend (clicks / new fans / revenue) is live;
@@ -523,6 +628,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"spend": total, "by_campaign": m})
             except Exception as e:
                 return self._send(200, {"spend": 0, "by_campaign": {}, "error": str(e)})
+        # Daily per-creator CSV for the Google Sheet (pulled via IMPORTDATA).
+        if path == "/sheet-feed":
+            key = (self._query().get("key") or [""])[0]
+            if not APP_PASSWORD or key != APP_PASSWORD:
+                return self._send(403, {"error": "forbidden"})
+            try:
+                return self._send(200, sheet_feed_csv(), "text/csv; charset=utf-8")
+            except Exception as e:
+                return self._send(200, "Date,Creator\nerror,%s\n" % str(e).replace(",", " "), "text/csv; charset=utf-8")
         if not self._authed():
             return self._send(200, LOGIN_HTML, "text/html; charset=utf-8")
         if path == "/":
