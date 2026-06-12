@@ -518,10 +518,11 @@ class Handler(BaseHTTPRequestHandler):
             if not APP_PASSWORD or key != APP_PASSWORD:
                 return self._send(403, {"error": "forbidden"})
             try:
-                total = round(sum(float(v) for v in (meta_spend_map() or {}).values()), 2)
-                return self._send(200, {"spend": total})
+                m = meta_spend_map() or {}
+                total = round(sum(float(v) for v in m.values()), 2)
+                return self._send(200, {"spend": total, "by_campaign": m})
             except Exception as e:
-                return self._send(200, {"spend": 0, "error": str(e)})
+                return self._send(200, {"spend": 0, "by_campaign": {}, "error": str(e)})
         if not self._authed():
             return self._send(200, LOGIN_HTML, "text/html; charset=utf-8")
         if path == "/":
