@@ -425,18 +425,23 @@ def sheet_feed_csv(days=60, sheet_id=""):
                                               "fans": {p: 0 for p in PLATS}, "rev": 0.0})
             rec["clicks"][plat] = clk
     spend = meta_spend_daily(start, datetime.date.today().isoformat())
+    mspend = read_manual_spend(sheet_id)   # {(date, creator_lower, platform): $}
     lines = [",".join(FEED_COLS)]
     for (ts, creator) in sorted(agg.keys()):
         rec = agg[(ts, creator)]
+        cl = creator.lower()
         ms = 0.0
         nc = _norm(creator)
         for (sd, camp), amt in spend.items():
             if sd == ts and camp and (camp in nc or nc in camp):
                 ms += amt
-        total_spend = ms
+        of_f = mspend.get((ts, cl, "OnlyFinder"), 0.0)
+        of_g = mspend.get((ts, cl, "OnlyGuider"), 0.0)
+        of_s = mspend.get((ts, cl, "OnlySeeker"), 0.0)
+        total_spend = ms + of_f + of_g + of_s
         total_fans = sum(rec["fans"].values())
         roas = (rec["rev"] / total_spend) if total_spend else ""
-        row = [ts, creator.replace(",", " "), "%.2f" % ms, "0", "0", "0"]
+        row = [ts, creator.replace(",", " "), "%.2f" % ms, "%.2f" % of_f, "%.2f" % of_g, "%.2f" % of_s]
         row += [str(rec["clicks"][p]) for p in PLATS]
         row += [str(rec["fans"][p]) for p in PLATS]
         row += ["%.2f" % rec["rev"], "%.2f" % total_spend, str(total_fans),
@@ -449,7 +454,7 @@ def sheet_feed_csv(days=60, sheet_id=""):
 
 def read_manual_spend(sheet_id):
     """Manual ad spend from the 'Manual Spend' tab (Date|Creator|Platform|Amount).
-    Returns {(date, platform): total_$} summed across creators."""
+    Returns {(date, creator_lower, platform): total_$}."""
     if not sheet_id:
         return {}
     url = ("https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&sheet=Manual%%20Spend"
@@ -473,11 +478,12 @@ def read_manual_spend(sheet_id):
             if len(row) < 4:
                 continue
             date = _norm_date(row[0])
+            creator = (row[1] or "").strip().lower()
             plat = (row[2] or "").strip()
             amt = (row[3] or "").strip().replace("$", "").replace(",", "")
             if date and plat in PLATS and amt:
                 try:
-                    out[(date, plat)] = out.get((date, plat), 0.0) + float(amt)
+                    out[(date, creator, plat)] = out.get((date, creator, plat), 0.0) + float(amt)
                 except Exception:
                     pass
         return out
@@ -539,7 +545,7 @@ def sheet_flat_csv(days=60, sheet_id=""):
         f["clicks"] += rec["clicks"]; f["fans"] += rec["fans"]; f["rev"] += rec["rev"]
     for (date, camp), amt in meta_spend_daily(start, datetime.date.today().isoformat()).items():
         flat.setdefault((date, "Meta"), {"clicks": 0, "fans": 0, "rev": 0.0, "spend": 0.0})["spend"] += amt
-    for (date, plat), amt in manual_spend.items():
+    for (date, _cl, plat), amt in manual_spend.items():
         flat.setdefault((date, plat), {"clicks": 0, "fans": 0, "rev": 0.0, "spend": 0.0})["spend"] += amt
     order = {p: i for i, p in enumerate(PLATS)}
     lines = [",".join(FLAT_COLS)]
