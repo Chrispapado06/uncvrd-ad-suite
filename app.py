@@ -296,13 +296,24 @@ def read_link_overrides(sheet_id):
         with urllib.request.urlopen(req, timeout=20) as r:
             text = r.read().decode("utf-8", "replace")
         import io
+        rows = list(csv.reader(io.StringIO(text)))
+        # find the header row (Code in col 3, Override in col 5); bail if this isn't
+        # actually the Link Settings tab (gviz returns the first sheet when it's missing)
+        hdr = -1
+        for i, row in enumerate(rows):
+            if len(row) >= 5 and (row[2] or "").strip().lower() == "code" \
+               and (row[4] or "").strip().lower().startswith("override"):
+                hdr = i
+                break
+        if hdr < 0:
+            return {}
         ov = {}
-        for row in csv.reader(io.StringIO(text)):
-            if len(row) < 4:
+        for row in rows[hdr + 1:]:
+            if len(row) < 5:
                 continue
             creator = (row[0] or "").strip().lower()
             code = (row[2] or "").strip()
-            choice = (row[3] or "").strip()
+            choice = (row[4] or "").strip()
             if creator and code and choice:
                 ov[creator + "|" + code] = choice
         return ov
