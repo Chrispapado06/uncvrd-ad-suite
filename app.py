@@ -321,6 +321,56 @@ def read_link_overrides(sheet_id):
         return {}
 
 
+def _norm_date(s):
+    """Normalize any common date format the sheet might hand us to YYYY-MM-DD."""
+    s = (s or "").strip()
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d", "%m/%d/%y", "%d-%m-%Y", "%d/%m/%y"):
+        try:
+            return datetime.datetime.strptime(s, fmt).date().isoformat()
+        except Exception:
+            pass
+    return s
+
+
+def read_manual_clicks(sheet_id):
+    """Boss's typed daily clicks from the 'Manual Clicks' tab (Date|Creator|Platform|Clicks).
+    Returns {(date, creator_lower, platform): clicks}. These REPLACE the auto clicks."""
+    if not sheet_id:
+        return {}
+    url = ("https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&sheet=Manual%%20Clicks"
+           % sheet_id)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "UNCVRD-AdTracker/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            text = r.read().decode("utf-8", "replace")
+        import io
+        rows = list(csv.reader(io.StringIO(text)))
+        hdr = -1
+        for i, row in enumerate(rows):
+            if len(row) >= 4 and (row[0] or "").strip().lower() == "date" \
+               and (row[3] or "").strip().lower() == "clicks":
+                hdr = i
+                break
+        if hdr < 0:
+            return {}
+        mc = {}
+        for row in rows[hdr + 1:]:
+            if len(row) < 4:
+                continue
+            date = _norm_date(row[0])
+            creator = (row[1] or "").strip().lower()
+            plat = (row[2] or "").strip()
+            val = (row[3] or "").strip()
+            if date and creator and plat in PLATS and val != "":
+                try:
+                    mc[(date, creator, plat)] = int(float(val))
+                except Exception:
+                    pass
+        return mc
+    except Exception:
+        return {}
+
+
 def sheet_feed_csv(days=60, sheet_id=""):
     """Daily per-creator ad numbers as CSV, straight from OnlyFans' per-day stats
     (and Meta when the token works). Stateless: regenerated on request, cached 15 min.
@@ -363,6 +413,17 @@ def sheet_feed_csv(days=60, sheet_id=""):
                 rec["clicks"][plat] += int(day.get("clicks") or 0)
                 rec["fans"][plat] += int(day.get("subs") or 0)
                 rec["rev"] += float(day.get("revenue") or 0)
+    # boss's manual daily clicks REPLACE the auto number for that day/creator/platform
+    manual_clicks = read_manual_clicks(sheet_id)
+    if manual_clicks:
+        name_by_lower = {}
+        for (ts, cr) in agg:
+            name_by_lower.setdefault(cr.lower(), cr)
+        for (date, cl, plat), clk in manual_clicks.items():
+            cr = name_by_lower.get(cl, cl)
+            rec = agg.setdefault((date, cr), {"clicks": {p: 0 for p in PLATS},
+                                              "fans": {p: 0 for p in PLATS}, "rev": 0.0})
+            rec["clicks"][plat] = clk
     spend = meta_spend_daily(start, datetime.date.today().isoformat())
     lines = [",".join(FEED_COLS)]
     for (ts, creator) in sorted(agg.keys()):
