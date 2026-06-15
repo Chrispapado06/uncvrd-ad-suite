@@ -495,6 +495,78 @@ FLAT_CACHE = {}
 FLAT_COLS = ["Date", "Platform", "Clicks", "Fans", "Spend", "Cost Per Fan", "CPC", "CVR",
              "Attributed Revenue", "Total Link LTV", "ROAS", "Agency Profit"]
 
+GRID_CACHE = {}
+GRID_COLS = ["Date", "Creator", "Platform", "Clicks", "Fans", "Spend", "Revenue"]
+
+
+def sheet_grid_csv(days=120, sheet_id=""):
+    """One row per (date, creator, platform) with clicks/fans/spend/revenue — the
+    granular base the weekly-by-creator view sums from. Honors overrides + manual tabs."""
+    ck = sheet_id or "_"
+    cached = GRID_CACHE.get(ck)
+    if cached and time.time() - cached[0] < 900:
+        return cached[1]
+    overrides = read_link_overrides(sheet_id)
+    manual_clicks = read_manual_clicks(sheet_id)
+    manual_spend = read_manual_spend(sheet_id)
+    start = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    rec = {}   # (date, creator, platform) -> {clicks, fans, rev}
+    for a in _of_accounts():
+        if not a.get("is_authenticated"):
+            continue
+        creator = a.get("display_name") or a.get("onlyfans_username") or ""
+        try:
+            links = _of_links(a["id"])
+        except Exception:
+            continue
+        for l in links:
+            ov = overrides.get(creator.lower() + "|" + str(l.get("campaignCode") or ""))
+            if ov:
+                plat = None if ov.lower() == "ignore" else (ov if ov in PLATS else _classify_platform(l.get("campaignName")))
+            else:
+                plat = _classify_platform(l.get("campaignName"))
+            if not plat or not l.get("id"):
+                continue
+            try:
+                st = _of_fetch("/%s/tracking-links/%s/stats" % (a["id"], l["id"]))
+            except Exception:
+                continue
+            for day in (((st or {}).get("data") or {}).get("daily_metrics") or []):
+                ts = day.get("timestamp") or ""
+                if ts < start:
+                    continue
+                r = rec.setdefault((ts, creator, plat), {"clicks": 0, "fans": 0, "rev": 0.0})
+                r["clicks"] += int(day.get("clicks") or 0)
+                r["fans"] += int(day.get("subs") or 0)
+                r["rev"] += float(day.get("revenue") or 0)
+    name_by_lower = {}
+    for (ts, cr, plat) in rec:
+        name_by_lower.setdefault(cr.lower(), cr)
+    for (date, clw, plat), clk in manual_clicks.items():
+        cr = name_by_lower.get(clw, clw)
+        r = rec.setdefault((date, cr, plat), {"clicks": 0, "fans": 0, "rev": 0.0})
+        r["clicks"] = clk
+    # Meta spend per (date, creator): campaigns are named by creator
+    meta = meta_spend_daily(start, datetime.date.today().isoformat())
+    meta_cd = {}
+    for (date, camp), amt in meta.items():
+        for clw in name_by_lower:
+            if camp and (camp in clw or clw in camp):
+                meta_cd[(date, clw)] = meta_cd.get((date, clw), 0.0) + amt
+    lines = [",".join(GRID_COLS)]
+    for (date, creator, plat) in sorted(rec.keys(), reverse=True):
+        r = rec[(date, creator, plat)]
+        cl = creator.lower()
+        if plat == "Meta":
+            sp = meta_cd.get((date, cl), 0.0)
+        else:
+            sp = manual_spend.get((date, cl, plat), 0.0)
+        lines.append(",".join([date, creator.replace(",", " "), plat,
+                               str(r["clicks"]), str(r["fans"]), "%.2f" % sp, "%.2f" % r["rev"]]))
+    body = "\n".join(lines) + "\n"
+    GRID_CACHE[ck] = (time.time(), body)
+    return body
+
 
 def sheet_flat_csv(days=60, sheet_id=""):
     """Flat daily breakdown: one row per (date, platform) across all creators, with
@@ -870,6 +942,16 @@ class Handler(BaseHTTPRequestHandler):
             sid = (self._query().get("sheet") or [""])[0]
             try:
                 return self._send(200, sheet_flat_csv(sheet_id=sid), "text/csv; charset=utf-8")
+            except Exception as e:
+                return self._send(200, "Date,Platform\nerror,%s\n" % str(e).replace(",", " "), "text/csv; charset=utf-8")
+        # Per (date, creator, platform) grid — for the weekly-by-creator sheet.
+        if path == "/sheet-grid":
+            key = (self._query().get("key") or [""])[0]
+            if not APP_PASSWORD or key != APP_PASSWORD:
+                return self._send(403, {"error": "forbidden"})
+            sid = (self._query().get("sheet") or [""])[0]
+            try:
+                return self._send(200, sheet_grid_csv(sheet_id=sid), "text/csv; charset=utf-8")
             except Exception as e:
                 return self._send(200, "Date,Creator\nerror,%s\n" % str(e).replace(",", " "), "text/csv; charset=utf-8")
         if not self._authed():
