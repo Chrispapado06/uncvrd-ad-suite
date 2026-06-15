@@ -276,7 +276,7 @@ def meta_spend_daily(since, until):
         return {}
 
 
-FEED_CACHE = {"at": 0, "body": None}
+FEED_CACHE = {}   # sheet_id -> (timestamp, csv_body)
 FEED_COLS = ["Date", "Creator", "Ad Spend Meta", "Ad Spend OnlyFinder", "Ad Spend OnlyGuider",
              "Ad Spend OnlySeeker", "Clicks Meta", "Clicks OnlyFinder", "Clicks OnlyGuider",
              "Clicks OnlySeeker", "Fans Meta", "Fans OnlyFinder", "Fans OnlyGuider",
@@ -284,11 +284,41 @@ FEED_COLS = ["Date", "Creator", "Ad Spend Meta", "Ad Spend OnlyFinder", "Ad Spen
 PLATS = ["Meta", "OnlyFinder", "OnlyGuider", "OnlySeeker"]
 
 
-def sheet_feed_csv(days=60):
+def read_link_overrides(sheet_id):
+    """Read the boss's manual choices from the sheet's 'Link Settings' tab.
+    Returns {creator_lower|code: platform-or-'ignore'}. {} on any problem (→ auto)."""
+    if not sheet_id:
+        return {}
+    url = ("https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&sheet=Link%%20Settings"
+           % sheet_id)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "UNCVRD-AdTracker/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            text = r.read().decode("utf-8", "replace")
+        import io
+        ov = {}
+        for row in csv.reader(io.StringIO(text)):
+            if len(row) < 4:
+                continue
+            creator = (row[0] or "").strip().lower()
+            code = (row[2] or "").strip()
+            choice = (row[3] or "").strip()
+            if creator and code and choice:
+                ov[creator + "|" + code] = choice
+        return ov
+    except Exception:
+        return {}
+
+
+def sheet_feed_csv(days=60, sheet_id=""):
     """Daily per-creator ad numbers as CSV, straight from OnlyFans' per-day stats
-    (and Meta when the token works). Stateless: regenerated on request, cached 15 min."""
-    if FEED_CACHE["body"] and time.time() - FEED_CACHE["at"] < 900:
-        return FEED_CACHE["body"]
+    (and Meta when the token works). Stateless: regenerated on request, cached 15 min.
+    Honors manual Link Settings overrides from the given sheet."""
+    ck = sheet_id or "_"
+    cached = FEED_CACHE.get(ck)
+    if cached and time.time() - cached[0] < 900:
+        return cached[1]
+    overrides = read_link_overrides(sheet_id)
     start = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
     agg = {}   # (date, creator) -> {"clicks":{p:n}, "fans":{p:n}, "rev":x}
     for a in _of_accounts():
@@ -300,7 +330,12 @@ def sheet_feed_csv(days=60):
         except Exception:
             continue
         for l in links:
-            plat = _classify_platform(l.get("campaignName"))
+            # manual override (by creator+code) wins; else auto-detect by name
+            ov = overrides.get(creator.lower() + "|" + str(l.get("campaignCode") or ""))
+            if ov:
+                plat = None if ov.lower() == "ignore" else (ov if ov in PLATS else _classify_platform(l.get("campaignName")))
+            else:
+                plat = _classify_platform(l.get("campaignName"))
             if not plat or not l.get("id"):
                 continue
             try:
@@ -336,8 +371,7 @@ def sheet_feed_csv(days=60):
                 ("%.2f" % roas) if roas != "" else "", "%.2f" % (rec["rev"] - total_spend)]
         lines.append(",".join(row))
     body = "\n".join(lines) + "\n"
-    FEED_CACHE["at"] = time.time()
-    FEED_CACHE["body"] = body
+    FEED_CACHE[ck] = (time.time(), body)
     return body
 
 
@@ -633,8 +667,9 @@ class Handler(BaseHTTPRequestHandler):
             key = (self._query().get("key") or [""])[0]
             if not APP_PASSWORD or key != APP_PASSWORD:
                 return self._send(403, {"error": "forbidden"})
+            sid = (self._query().get("sheet") or [""])[0]
             try:
-                return self._send(200, sheet_feed_csv(), "text/csv; charset=utf-8")
+                return self._send(200, sheet_feed_csv(sheet_id=sid), "text/csv; charset=utf-8")
             except Exception as e:
                 return self._send(200, "Date,Creator\nerror,%s\n" % str(e).replace(",", " "), "text/csv; charset=utf-8")
         if not self._authed():
