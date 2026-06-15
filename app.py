@@ -447,6 +447,118 @@ def sheet_feed_csv(days=60, sheet_id=""):
     return body
 
 
+def read_manual_spend(sheet_id):
+    """Manual ad spend from the 'Manual Spend' tab (Date|Creator|Platform|Amount).
+    Returns {(date, platform): total_$} summed across creators."""
+    if not sheet_id:
+        return {}
+    url = ("https://docs.google.com/spreadsheets/d/%s/gviz/tq?tqx=out:csv&sheet=Manual%%20Spend"
+           % sheet_id)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "UNCVRD-AdTracker/1.0"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            text = r.read().decode("utf-8", "replace")
+        import io
+        rows = list(csv.reader(io.StringIO(text)))
+        hdr = -1
+        for i, row in enumerate(rows):
+            if len(row) >= 4 and (row[0] or "").strip().lower() == "date" \
+               and (row[2] or "").strip().lower() == "platform":
+                hdr = i
+                break
+        if hdr < 0:
+            return {}
+        out = {}
+        for row in rows[hdr + 1:]:
+            if len(row) < 4:
+                continue
+            date = _norm_date(row[0])
+            plat = (row[2] or "").strip()
+            amt = (row[3] or "").strip().replace("$", "").replace(",", "")
+            if date and plat in PLATS and amt:
+                try:
+                    out[(date, plat)] = out.get((date, plat), 0.0) + float(amt)
+                except Exception:
+                    pass
+        return out
+    except Exception:
+        return {}
+
+
+FLAT_CACHE = {}
+FLAT_COLS = ["Date", "Platform", "Clicks", "Fans", "Spend", "Cost Per Fan", "CPC", "CVR",
+             "Attributed Revenue", "Total Link LTV", "ROAS", "Agency Profit"]
+
+
+def sheet_flat_csv(days=60, sheet_id=""):
+    """Flat daily breakdown: one row per (date, platform) across all creators, with
+    every metric computed. For the boss's horizontal-table view."""
+    ck = sheet_id or "_"
+    cached = FLAT_CACHE.get(ck)
+    if cached and time.time() - cached[0] < 900:
+        return cached[1]
+    overrides = read_link_overrides(sheet_id)
+    manual_clicks = read_manual_clicks(sheet_id)
+    manual_spend = read_manual_spend(sheet_id)
+    start = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    percp = {}   # (date, creator_lower, platform) -> {clicks, fans, rev}
+    for a in _of_accounts():
+        if not a.get("is_authenticated"):
+            continue
+        creator = (a.get("display_name") or a.get("onlyfans_username") or "").lower()
+        try:
+            links = _of_links(a["id"])
+        except Exception:
+            continue
+        for l in links:
+            ov = overrides.get(creator + "|" + str(l.get("campaignCode") or ""))
+            if ov:
+                plat = None if ov.lower() == "ignore" else (ov if ov in PLATS else _classify_platform(l.get("campaignName")))
+            else:
+                plat = _classify_platform(l.get("campaignName"))
+            if not plat or not l.get("id"):
+                continue
+            try:
+                st = _of_fetch("/%s/tracking-links/%s/stats" % (a["id"], l["id"]))
+            except Exception:
+                continue
+            for day in (((st or {}).get("data") or {}).get("daily_metrics") or []):
+                ts = day.get("timestamp") or ""
+                if ts < start:
+                    continue
+                rec = percp.setdefault((ts, creator, plat), {"clicks": 0, "fans": 0, "rev": 0.0})
+                rec["clicks"] += int(day.get("clicks") or 0)
+                rec["fans"] += int(day.get("subs") or 0)
+                rec["rev"] += float(day.get("revenue") or 0)
+    for (date, cl, plat), clk in manual_clicks.items():
+        rec = percp.setdefault((date, cl, plat), {"clicks": 0, "fans": 0, "rev": 0.0})
+        rec["clicks"] = clk
+    flat = {}    # (date, platform) -> {clicks, fans, rev, spend}
+    for (date, cl, plat), rec in percp.items():
+        f = flat.setdefault((date, plat), {"clicks": 0, "fans": 0, "rev": 0.0, "spend": 0.0})
+        f["clicks"] += rec["clicks"]; f["fans"] += rec["fans"]; f["rev"] += rec["rev"]
+    for (date, camp), amt in meta_spend_daily(start, datetime.date.today().isoformat()).items():
+        flat.setdefault((date, "Meta"), {"clicks": 0, "fans": 0, "rev": 0.0, "spend": 0.0})["spend"] += amt
+    for (date, plat), amt in manual_spend.items():
+        flat.setdefault((date, plat), {"clicks": 0, "fans": 0, "rev": 0.0, "spend": 0.0})["spend"] += amt
+    order = {p: i for i, p in enumerate(PLATS)}
+    lines = [",".join(FLAT_COLS)]
+    for (date, plat) in sorted(flat.keys(), key=lambda x: (x[0], order.get(x[1], 9)), reverse=True):
+        f = flat[(date, plat)]
+        c, fa, rev, sp = f["clicks"], f["fans"], f["rev"], f["spend"]
+        num = lambda v: ("%.2f" % v) if v != "" else ""
+        cpf = (sp / fa) if fa else ""
+        cpc = (sp / c) if c else ""
+        cvr = ("%.1f%%" % (100.0 * fa / c)) if c else ""
+        ltv = (rev / fa) if fa else ""
+        roas = (rev / sp) if sp else ""
+        lines.append(",".join([date, plat, str(c), str(fa), num(sp), num(cpf), num(cpc),
+                               cvr, num(rev), num(ltv), num(roas), num(rev - sp)]))
+    body = "\n".join(lines) + "\n"
+    FLAT_CACHE[ck] = (time.time(), body)
+    return body
+
+
 def sync_onlyfans():
     """Pull every authenticated account's tracking links into live rows the
     dashboard + analyst read. Backend (clicks / new fans / revenue) is live;
@@ -742,6 +854,16 @@ class Handler(BaseHTTPRequestHandler):
             sid = (self._query().get("sheet") or [""])[0]
             try:
                 return self._send(200, sheet_feed_csv(sheet_id=sid), "text/csv; charset=utf-8")
+            except Exception as e:
+                return self._send(200, "Date,Creator\nerror,%s\n" % str(e).replace(",", " "), "text/csv; charset=utf-8")
+        # Flat daily breakdown (one row per date+platform) for the boss's horizontal table.
+        if path == "/sheet-flat":
+            key = (self._query().get("key") or [""])[0]
+            if not APP_PASSWORD or key != APP_PASSWORD:
+                return self._send(403, {"error": "forbidden"})
+            sid = (self._query().get("sheet") or [""])[0]
+            try:
+                return self._send(200, sheet_flat_csv(sheet_id=sid), "text/csv; charset=utf-8")
             except Exception as e:
                 return self._send(200, "Date,Creator\nerror,%s\n" % str(e).replace(",", " "), "text/csv; charset=utf-8")
         if not self._authed():
