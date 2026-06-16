@@ -498,6 +498,76 @@ FLAT_COLS = ["Date", "Platform", "Clicks", "Fans", "Spend", "Cost Per Fan", "CPC
 GRID_CACHE = {}
 GRID_COLS = ["Date", "Creator", "Platform", "Clicks", "Fans", "Spend", "Revenue"]
 
+COHORT_CACHE = {}
+COHORT_COLS = ["Creator", "Platform", "Subs", "Clicks",
+               "Rev48h", "Rev7d", "Rev14d", "Rev21d", "Rev30d", "RevAll"]
+
+
+def _of_cohort_arps(aid, lid, start, end):
+    """OnlyFansAPI's cohort time-to-profit numbers for one tracking link: how much the
+    subscribers it acquired have spent by 48h / 7d / 14d / 21d / 30d / all-time."""
+    qs = urllib.parse.urlencode({"acquisition_start": start, "acquisition_end": end,
+                                 "revenue_basis": "net"})
+    d = _of_fetch("/%s/tracking-links/%s/cohort-arps?%s" % (aid, lid, qs))
+    return (d or {}).get("data") or {}
+
+
+def cohort_grid_csv(sheet_id=""):
+    """One row per (creator, platform) with the cohort's subscribers, clicks, and the
+    revenue those subscribers had spent by each age — the base the Time-to-Profit /
+    break-even view sums from. The sheet supplies Cost-Per-Click and does the math."""
+    ck = sheet_id or "_"
+    cached = COHORT_CACHE.get(ck)
+    if cached and time.time() - cached[0] < 900:
+        return cached[1]
+    overrides = read_link_overrides(sheet_id)
+    end = datetime.date.today().isoformat()
+    start = (datetime.date.today() - datetime.timedelta(days=730)).isoformat()  # all-time cohort
+    rec = {}   # (creator, platform) -> sums
+    for a in _of_accounts():
+        if not a.get("is_authenticated"):
+            continue
+        creator = a.get("display_name") or a.get("onlyfans_username") or ""
+        try:
+            links = _of_links(a["id"])
+        except Exception:
+            continue
+        for l in links:
+            ov = overrides.get(creator.lower() + "|" + str(l.get("campaignCode") or ""))
+            if ov:
+                plat = None if ov.lower() == "ignore" else (ov if ov in PLATS else _classify_platform(l.get("campaignName")))
+            else:
+                plat = _classify_platform(l.get("campaignName"))
+            if not plat or not l.get("id"):
+                continue
+            if int(l.get("subscribersCount") or 0) <= 0:
+                continue   # no cohort yet → skip the API call (keeps it fast)
+            try:
+                c = _of_cohort_arps(a["id"], l["id"], start, end)
+            except Exception:
+                continue
+            r = rec.setdefault((creator, plat), {"subs": 0, "clicks": 0, "r48": 0.0,
+                                                 "r7": 0.0, "r14": 0.0, "r21": 0.0,
+                                                 "r30": 0.0, "rall": 0.0})
+            r["subs"] += int(c.get("subscribers_count") or 0)
+            r["clicks"] += int(l.get("clicksCount") or 0)
+            r["r48"] += float(c.get("revenue_48h_total") or 0)
+            r["r7"] += float(c.get("revenue_7d_total") or 0)
+            r["r14"] += float(c.get("revenue_14d_total") or 0)
+            r["r21"] += float(c.get("revenue_21d_total") or 0)
+            r["r30"] += float(c.get("revenue_30d_total") or 0)
+            r["rall"] += float(c.get("revenue_all_time_total") or 0)
+    order = {p: i for i, p in enumerate(PLATS)}
+    lines = [",".join(COHORT_COLS)]
+    for (creator, plat) in sorted(rec.keys(), key=lambda x: (x[0].lower(), order.get(x[1], 9))):
+        r = rec[(creator, plat)]
+        lines.append(",".join([creator.replace(",", " "), plat, str(r["subs"]), str(r["clicks"]),
+                               "%.2f" % r["r48"], "%.2f" % r["r7"], "%.2f" % r["r14"],
+                               "%.2f" % r["r21"], "%.2f" % r["r30"], "%.2f" % r["rall"]]))
+    body = "\n".join(lines) + "\n"
+    COHORT_CACHE[ck] = (time.time(), body)
+    return body
+
 
 def sheet_grid_csv(days=120, sheet_id=""):
     """One row per (date, creator, platform) with clicks/fans/spend/revenue — the
@@ -954,6 +1024,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, sheet_grid_csv(sheet_id=sid), "text/csv; charset=utf-8")
             except Exception as e:
                 return self._send(200, "Date,Creator\nerror,%s\n" % str(e).replace(",", " "), "text/csv; charset=utf-8")
+        # Per (creator, platform) cohort time-to-profit / break-even base — for the sheet.
+        if path == "/cohort-grid":
+            key = (self._query().get("key") or [""])[0]
+            if not APP_PASSWORD or key != APP_PASSWORD:
+                return self._send(403, {"error": "forbidden"})
+            sid = (self._query().get("sheet") or [""])[0]
+            try:
+                return self._send(200, cohort_grid_csv(sheet_id=sid), "text/csv; charset=utf-8")
+            except Exception as e:
+                return self._send(200, "Creator,Platform\nerror,%s\n" % str(e).replace(",", " "), "text/csv; charset=utf-8")
         if not self._authed():
             return self._send(200, LOGIN_HTML, "text/html; charset=utf-8")
         if path == "/":
