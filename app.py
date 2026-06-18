@@ -247,6 +247,10 @@ def _classify_platform(name):
         return "OnlySeeker"
     if "finder" in n or "search" in n:
         return "OnlyFinder"
+    # OnlyTraffic directory — require BOTH words so we skip OnlyFans' auto-generated
+    # "Traffic/<id>/#nnn/..." junk links and unrelated channels like "TT Traffic".
+    if "traffic" in n and "only" in n:
+        return "OnlyTraffic"
     return None
 
 
@@ -278,10 +282,12 @@ def meta_spend_daily(since, until):
 
 FEED_CACHE = {}   # sheet_id -> (timestamp, csv_body)
 FEED_COLS = ["Date", "Creator", "Ad Spend Meta", "Ad Spend OnlyFinder", "Ad Spend OnlyGuider",
-             "Ad Spend OnlySeeker", "Clicks Meta", "Clicks OnlyFinder", "Clicks OnlyGuider",
-             "Clicks OnlySeeker", "Fans Meta", "Fans OnlyFinder", "Fans OnlyGuider",
-             "Fans OnlySeeker", "Revenue", "Total Spend", "Total Fans", "ROAS", "Profit"]
-PLATS = ["Meta", "OnlyFinder", "OnlyGuider", "OnlySeeker"]
+             "Ad Spend OnlySeeker", "Ad Spend OnlyTraffic",
+             "Clicks Meta", "Clicks OnlyFinder", "Clicks OnlyGuider", "Clicks OnlySeeker",
+             "Clicks OnlyTraffic", "Fans Meta", "Fans OnlyFinder", "Fans OnlyGuider",
+             "Fans OnlySeeker", "Fans OnlyTraffic", "Revenue", "Total Spend", "Total Fans",
+             "ROAS", "Profit"]
+PLATS = ["Meta", "OnlyFinder", "OnlyGuider", "OnlySeeker", "OnlyTraffic"]
 
 
 def read_link_overrides(sheet_id):
@@ -438,10 +444,12 @@ def sheet_feed_csv(days=60, sheet_id=""):
         of_f = mspend.get((ts, cl, "OnlyFinder"), 0.0)
         of_g = mspend.get((ts, cl, "OnlyGuider"), 0.0)
         of_s = mspend.get((ts, cl, "OnlySeeker"), 0.0)
-        total_spend = ms + of_f + of_g + of_s
+        of_t = mspend.get((ts, cl, "OnlyTraffic"), 0.0)
+        total_spend = ms + of_f + of_g + of_s + of_t
         total_fans = sum(rec["fans"].values())
         roas = (rec["rev"] / total_spend) if total_spend else ""
-        row = [ts, creator.replace(",", " "), "%.2f" % ms, "%.2f" % of_f, "%.2f" % of_g, "%.2f" % of_s]
+        row = [ts, creator.replace(",", " "), "%.2f" % ms, "%.2f" % of_f, "%.2f" % of_g,
+               "%.2f" % of_s, "%.2f" % of_t]
         row += [str(rec["clicks"][p]) for p in PLATS]
         row += [str(rec["fans"][p]) for p in PLATS]
         row += ["%.2f" % rec["rev"], "%.2f" % total_spend, str(total_fans),
