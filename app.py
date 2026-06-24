@@ -1042,6 +1042,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, cohort_grid_csv(sheet_id=sid), "text/csv; charset=utf-8")
             except Exception as e:
                 return self._send(200, "Creator,Platform\nerror,%s\n" % str(e).replace(",", " "), "text/csv; charset=utf-8")
+        # Keep-warm: wakes the dyno AND pre-builds both data caches in the background so the
+        # sheet's IMPORTDATA always hits a warm cache (instant) instead of a 15s recompute.
+        # Point a reliable pinger (cron-job.org / UptimeRobot) at this every ~5 minutes.
+        if path == "/warm":
+            key = (self._query().get("key") or [""])[0]
+            if not APP_PASSWORD or key != APP_PASSWORD:
+                return self._send(403, {"error": "forbidden"})
+            def _bg():
+                try: sheet_grid_csv(sheet_id="")
+                except Exception: pass
+                try: cohort_grid_csv(sheet_id="")
+                except Exception: pass
+            threading.Thread(target=_bg, daemon=True).start()
+            return self._send(200, {"warming": True})
         if not self._authed():
             return self._send(200, LOGIN_HTML, "text/html; charset=utf-8")
         if path == "/":
