@@ -505,10 +505,34 @@ FLAT_COLS = ["Date", "Platform", "Clicks", "Fans", "Spend", "Cost Per Fan", "CPC
 
 GRID_CACHE = {}
 GRID_COLS = ["Date", "Creator", "Platform", "Clicks", "Fans", "Spend", "Revenue"]
+GRID_REFRESHING = {}
 
 COHORT_CACHE = {}
 COHORT_COLS = ["Creator", "Platform", "Subs", "Clicks",
                "Rev48h", "Rev7d", "Rev14d", "Rev21d", "Rev30d", "RevAll"]
+COHORT_REFRESHING = {}
+
+CACHE_TTL = 900  # 15 min
+
+
+def _swr(cache, refreshing, ck, refetch):
+    """Stale-while-revalidate. Returns a body to serve instantly (fresh, or stale while a
+    background refresh runs), or None if nothing is cached yet (caller computes synchronously).
+    This keeps the sheet's IMPORTDATA fast — a user never waits on the ~15s recompute."""
+    c = cache.get(ck)
+    if not c:
+        return None
+    if time.time() - c[0] < CACHE_TTL:
+        return c[1]
+    if not refreshing.get(ck):
+        refreshing[ck] = True
+        def _r():
+            try:
+                refetch()
+            finally:
+                refreshing[ck] = False
+        threading.Thread(target=_r, daemon=True).start()
+    return c[1]   # serve stale immediately
 
 
 def _of_cohort_arps(aid, lid, start, end):
@@ -520,14 +544,16 @@ def _of_cohort_arps(aid, lid, start, end):
     return (d or {}).get("data") or {}
 
 
-def cohort_grid_csv(sheet_id=""):
+def cohort_grid_csv(sheet_id="", _force=False):
     """One row per (creator, platform) with the cohort's subscribers, clicks, and the
     revenue those subscribers had spent by each age — the base the Time-to-Profit /
     break-even view sums from. The sheet supplies Cost-Per-Click and does the math."""
     ck = sheet_id or "_"
-    cached = COHORT_CACHE.get(ck)
-    if cached and time.time() - cached[0] < 900:
-        return cached[1]
+    if not _force:
+        hit = _swr(COHORT_CACHE, COHORT_REFRESHING, ck,
+                   lambda: cohort_grid_csv(sheet_id=sheet_id, _force=True))
+        if hit is not None:
+            return hit
     overrides = read_link_overrides(sheet_id)
     end = datetime.date.today().isoformat()
     start = (datetime.date.today() - datetime.timedelta(days=730)).isoformat()  # all-time cohort
@@ -577,13 +603,15 @@ def cohort_grid_csv(sheet_id=""):
     return body
 
 
-def sheet_grid_csv(days=120, sheet_id=""):
+def sheet_grid_csv(days=120, sheet_id="", _force=False):
     """One row per (date, creator, platform) with clicks/fans/spend/revenue — the
     granular base the weekly-by-creator view sums from. Honors overrides + manual tabs."""
     ck = sheet_id or "_"
-    cached = GRID_CACHE.get(ck)
-    if cached and time.time() - cached[0] < 900:
-        return cached[1]
+    if not _force:
+        hit = _swr(GRID_CACHE, GRID_REFRESHING, ck,
+                   lambda: sheet_grid_csv(days=days, sheet_id=sheet_id, _force=True))
+        if hit is not None:
+            return hit
     overrides = read_link_overrides(sheet_id)
     manual_clicks = read_manual_clicks(sheet_id)
     manual_spend = read_manual_spend(sheet_id)
